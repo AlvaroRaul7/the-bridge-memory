@@ -225,3 +225,70 @@ def test_message_with_no_attached_documents_sends_text_only(client, fake):
 
     content = fake.sent[0][1][0]["content"]
     assert content == [{"type": "text", "text": "hi"}]
+
+
+def test_the_store_is_scoped_to_the_module_as_well_as_the_customer(
+    client, fake, monkeypatch
+):
+    """One customer, two assistants, two stores.
+
+    This is the invariant that a live check caught broken: mounting a store
+    keyed on customer_id alone would put a diligence session's restated EBITDA
+    figure in front of the onboarding assistant, and vice versa.
+    """
+    for module in ("CARD_A_ONBOARDING", "CARD_C_MA_DILIGENCE"):
+        for kind in ("AGENT", "ENVIRONMENT", "MEMORY_STORE"):
+            monkeypatch.setenv(f"{kind}_ID_{module}", f"{kind.lower()}_{module}")
+
+    client.post(
+        "/session", json={"customer_id": CUSTOMER_ID, "module": "card-a-onboarding"}
+    )
+    client.post(
+        "/session", json={"customer_id": CUSTOMER_ID, "module": "card-c-ma-diligence"}
+    )
+    # Returning to the first assistant must reuse, not create a third.
+    client.post(
+        "/session", json={"customer_id": CUSTOMER_ID, "module": "card-a-onboarding"}
+    )
+
+    created = fake.memory_stores_created
+    assert len(created) == 2
+    assert [s["metadata"]["module"] for s in created] == [
+        "card-a-onboarding",
+        "card-c-ma-diligence",
+    ]
+    assert all(s["metadata"]["customer_id"] == CUSTOMER_ID for s in created)
+
+
+def test_the_module_decides_which_agent_answers(client, fake, monkeypatch):
+    monkeypatch.setenv("AGENT_ID_CARD_B_CUSTOMER_SUCCESS", "agent_card_b")
+    monkeypatch.setenv("ENVIRONMENT_ID_CARD_B_CUSTOMER_SUCCESS", "env_card_b")
+    monkeypatch.setenv("MEMORY_STORE_ID_CARD_B_CUSTOMER_SUCCESS", "store_card_b")
+
+    client.post(
+        "/session",
+        json={"customer_id": CUSTOMER_ID, "module": "card-b-customer-success"},
+    )
+    assert fake.created[0]["agent"] == "agent_card_b"
+    assert fake.created[0]["environment_id"] == "env_card_b"
+
+
+def test_an_unprovisioned_module_is_a_404_naming_the_fix(client, monkeypatch):
+    """Not a 422 from upstream saying "invalid agent ID" — the caller can act
+    on a 404 that names the module and the command, and cannot act on that."""
+    from app.modules import ModuleError
+
+    def unprovisioned(module_id: str):
+        raise ModuleError(
+            f"Module {module_id!r} has no provisioned agent id. "
+            f"Run: python backend/provision.py --module {module_id}"
+        )
+
+    # Patched where it is used, not where it is defined — session.py imported
+    # the name directly, so patching app.modules would not reach it.
+    monkeypatch.setattr("app.routers.session.resources_for", unprovisioned)
+    response = client.post(
+        "/session", json={"customer_id": CUSTOMER_ID, "module": "card-d-sales-engineer"}
+    )
+    assert response.status_code == 404
+    assert "provision.py" in response.json()["detail"]

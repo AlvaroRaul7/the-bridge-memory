@@ -201,11 +201,18 @@ export const api = {
    * GET /memory?source=agent&customer_id= — what the agent itself chose to
    * write to its mounted store during a session, as files with paths.
    */
-  listAgentMemory: (customerId: string, opts: { includeContent?: boolean } = {}) =>
+  listAgentMemory: (
+    customerId: string,
+    opts: { module?: string; includeContent?: boolean } = {},
+  ) =>
     request<AgentMemoryListResponse>(
       `/memory${qs({
         source: 'agent',
         customer_id: customerId,
+        // Must match the module the session was opened with. The store is
+        // scoped to (customer, module); omitting this reads a different,
+        // customer-wide store that no session ever wrote to.
+        module: opts.module,
         include_content: opts.includeContent ? 'true' : undefined,
       })}`,
     ),

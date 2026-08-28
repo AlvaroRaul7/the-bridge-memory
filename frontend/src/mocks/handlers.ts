@@ -263,7 +263,7 @@ export const handlers = [
       // agent turn does, with file tools against its mount.
       return HttpResponse.json({
         source: 'agent',
-        memory_store_id: storeFor(customerId),
+        memory_store_id: storeFor(customerId, params.get('module')),
         memories: [],
         prefixes: [],
       } satisfies AgentMemoryListResponse)

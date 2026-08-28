@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
 from .errors import register_exception_handlers
-from .routers import health, memory, session
+from .routers import health, memory, modules, session
 
 
 def create_app() -> FastAPI:
@@ -36,6 +36,7 @@ def create_app() -> FastAPI:
     register_exception_handlers(app)
 
     app.include_router(health.router)
+    app.include_router(modules.router)
     app.include_router(session.router)
     app.include_router(memory.router)
 

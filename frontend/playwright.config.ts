@@ -43,6 +43,17 @@ export default defineConfig({
        * process.env wins over .env files in Vite, so '' really does disable it.
        */
       VITE_CLERK_PUBLISHABLE_KEY: process.env.VITE_CLERK_PUBLISHABLE_KEY ?? '',
+
+      /**
+       * Mocks ON by default, whatever .env.local says.
+       *
+       * The suite must not depend on a backend being up — otherwise a failure
+       * means "uvicorn is not running", not "the UI is broken". Run against
+       * the real service deliberately:
+       *
+       *   VITE_USE_MOCKS=false npx playwright test live-backend
+       */
+      VITE_USE_MOCKS: process.env.VITE_USE_MOCKS ?? 'true',
     },
   },
 })

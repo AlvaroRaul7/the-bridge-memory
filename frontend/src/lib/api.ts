@@ -26,6 +26,7 @@ import type {
   MemoryWriteRequest,
   MemoryWriteResponse,
   MessageResponse,
+  ModuleInfo,
   SessionCreateRequest,
   SessionResponse,
 } from './api-types'
@@ -125,6 +126,9 @@ const qs = (params: Record<string, string | number | boolean | undefined>) => {
 export const api = {
   /** GET /healthz — no auth, no upstream call. */
   health: () => request<Health>('/healthz'),
+
+  /** GET /modules */
+  listModules: () => request<ModuleInfo[]>('/modules'),
 
   /* --- sessions ----------------------------------------------------------
    * The backend mounts one memory store from its own settings, so a session

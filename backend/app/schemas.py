@@ -17,6 +17,14 @@ from pydantic import BaseModel, Field
 
 
 class SessionCreateRequest(BaseModel):
+    module: str | None = Field(
+        default=None,
+        description=(
+            "Which module to open the session against. Each module has its own "
+            "agent and its own memory store. Omitted falls back to the "
+            "single-agent configuration."
+        ),
+    )
     title: str | None = Field(
         default=None, description="Shown in the Console session list."
     )
@@ -46,7 +54,19 @@ class SessionResponse(BaseModel):
     title: str | None = None
     created_at: datetime | None = None
     memory_store_id: str
+    module: str | None = None
     usage: SessionUsage | None = None
+
+
+class ModuleInfo(BaseModel):
+    """A module the service can open a session against."""
+
+    id: str
+    name: str
+    domain: str
+    provisioned: bool = Field(
+        description="False when this module has no agent yet; /session will fail."
+    )
 
 
 # --- messages ---------------------------------------------------------------

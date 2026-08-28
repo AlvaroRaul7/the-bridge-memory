@@ -11,7 +11,12 @@
  * each other's conversations.
  */
 
-const KEY = 'ib.sessions.v1'
+/**
+ * Namespaced by API mode. Session ids minted by the msw mock are not valid
+ * Managed Agents ids, so replaying one against the real backend gets a 422 —
+ * keeping the two sets apart stops that happening at all.
+ */
+const KEY = `ib.sessions.v1.${import.meta.env.VITE_USE_MOCKS === 'true' ? 'mock' : 'live'}`
 
 export interface StoredSession {
   sessionId: string

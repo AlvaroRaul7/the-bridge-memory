@@ -10,6 +10,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { savedAt } from '@/lib/api-types'
 import type { MemoryKind, MemoryRecord } from '@/lib/api-types'
 import { cn } from '@/lib/utils'
 
@@ -129,9 +130,9 @@ export function MemoryInspector({
                 </pre>
 
                 <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-                  {record.metadata.created_at && (
-                    <time dateTime={record.metadata.created_at}>
-                      Saved {new Date(record.metadata.created_at).toLocaleString()}
+                  {savedAt(record.metadata) && (
+                    <time dateTime={savedAt(record.metadata)}>
+                      Saved {new Date(savedAt(record.metadata)!).toLocaleString()}
                     </time>
                   )}
                   {/* Provenance the backend session cannot carry — see

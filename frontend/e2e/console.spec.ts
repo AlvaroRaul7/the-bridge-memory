@@ -99,3 +99,47 @@ test('switching assistant switches workspace', async ({ page }) => {
   await page.getByRole('button', { name: /M&A Diligence Analyst/ }).click()
   await expect(page.getByText('Project Lighthouse / Helios Data Systems').first()).toBeVisible()
 })
+
+test('a stored session the backend rejects is dropped, not retried forever', async ({
+  page,
+}) => {
+  // A session id minted by a previous run/mode. The backend answers 404 (mock)
+  // or 422 (real Managed Agents, which validates the id format) — either way
+  // it must be forgotten rather than re-fetched on every load.
+  await page.goto('/')
+  await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('ib.sessions.v1'))
+      ?? 'ib.sessions.v1.mock'
+    localStorage.setItem(
+      key,
+      JSON.stringify({
+        'demo:card-a-onboarding': [
+          {
+            sessionId: 'sess_deadbeef',
+            userId: 'demo',
+            scenarioId: 'card-a-onboarding',
+            title: 'Stale conversation',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }),
+    )
+  })
+
+  const rejected: number[] = []
+  page.on('response', (r) => {
+    if (r.url().includes('/session/sess_deadbeef')) rejected.push(r.status())
+  })
+
+  await page.reload()
+  await page.getByRole('tab', { name: /ask/i }).click()
+  await expect(page.getByText('No conversation yet')).toBeVisible()
+
+  // Asked for once, then removed from storage.
+  expect(rejected.length).toBeGreaterThan(0)
+  const remaining = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((k) => k.startsWith('ib.sessions.v1'))
+    return key ? localStorage.getItem(key) : null
+  })
+  expect(remaining ?? '').not.toContain('sess_deadbeef')
+})

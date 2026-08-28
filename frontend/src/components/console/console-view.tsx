@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { api, ApiError } from '@/lib/api'
 import { tenantId as makeTenantId } from '@/lib/auth'
 import {
+  forgetSession,
   listSessions,
   mostRecentSession,
   rememberSession,
@@ -93,11 +94,18 @@ export function ConsoleView({
     const recent = mostRecentSession(userId, scenario.id)
     if (!recent) return
 
-    // Confirm the backend still has it; sessions do get terminated.
+    // Confirm the backend still has it; sessions get terminated, and an id
+    // left over from a different API mode will be rejected outright.
     api
       .getSession(recent.sessionId)
       .then(() => setActiveSessionId(recent.sessionId))
-      .catch(() => setActiveSessionId(undefined))
+      .catch(() => {
+        // Drop it. Without this the same dead id is re-fetched on every load,
+        // logging a 404/422 each time and never clearing itself.
+        forgetSession(userId, scenario.id, recent.sessionId)
+        setSessions((prev) => prev.filter((s) => s.sessionId !== recent.sessionId))
+        setActiveSessionId(undefined)
+      })
   }, [loadMemories, scenario.id, userId])
 
   /**
@@ -113,6 +121,9 @@ export function ConsoleView({
     try {
       const title = `${scenario.shortName} · ${new Date().toLocaleDateString()}`
       const created = await api.createSession({
+        // Each assistant has its own agent and memory store server-side; this
+        // is what makes the picker mean something.
+        module: scenario.id,
         title,
         // The backend has no scenario concept, so which assistant this is
         // travels as per-session guidance — which is also genuinely useful to
@@ -141,7 +152,7 @@ export function ConsoleView({
           id: `err_${Date.now()}`,
           role: 'agent',
           text: '',
-          error: `Could not start a conversation: ${describe(err)}`,
+          error: explainSessionFailure(err),
         },
       ])
       return undefined
@@ -289,6 +300,38 @@ export function ConsoleView({
       />
     </div>
   )
+}
+
+/**
+ * Turn a session-create failure into something actionable.
+ *
+ * The backend deliberately does not forward upstream error text, so a
+ * misconfigured AGENT_ID surfaces only as "422 — The request was rejected
+ * upstream as invalid", which tells the reader nothing. 422 on session
+ * creation has one overwhelmingly likely cause: the Managed Agents resource
+ * ids are missing or still placeholders. Say so, and say where to look.
+ */
+function explainSessionFailure(err: unknown): string {
+  const status = err instanceof ApiError ? err.status : 0
+  if (status === 404) {
+    // The backend names the module and the command to fix it.
+    return (
+      err instanceof ApiError ? err.message : 'This assistant has no agent yet.'
+    )
+  }
+  if (status === 422) {
+    return (
+      'Chat is not available yet: the backend has no valid Managed Agents ' +
+      'agent to talk to. Provision one with `python backend/provision.py ' +
+      '--all`. Saved memory and search work without it.'
+    )
+  }
+  if (status === 401) {
+    return 'The backend rejected the API key. Check VITE_API_KEY matches BACKEND_API_KEY.'
+  }
+  return `Could not start a conversation: ${
+    err instanceof ApiError ? err.message : String(err)
+  }`
 }
 
 function HealthPill({ health }: { health?: 'ok' | 'down' }) {

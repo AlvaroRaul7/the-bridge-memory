@@ -18,6 +18,11 @@
  */
 
 export interface SessionCreateRequest {
+  /**
+   * Which module to open the session against. Each module has its own agent
+   * and its own memory store, so this decides who answers.
+   */
+  module?: string
   title?: string
   /** Per-session guidance injected into the agent's system prompt. */
   instructions?: string
@@ -38,7 +43,17 @@ export interface SessionResponse {
   title?: string | null
   created_at?: string | null
   memory_store_id: string
+  module?: string | null
   usage?: SessionUsage | null
+}
+
+/** GET /modules — which assistants exist, and which have an agent behind them. */
+export interface ModuleInfo {
+  id: string
+  name: string
+  domain: string
+  /** False when the module has no agent yet; opening a session will fail. */
+  provisioned: boolean
 }
 
 /* --- messages -------------------------------------------------------------- */
@@ -121,7 +136,12 @@ export interface MemoryMetadata {
   session_id?: string
   /** Which assistant. Also encoded in tenant_id; kept for display. */
   scenario_id?: string
+  /** Written by this client. */
   created_at?: string
+  /** Written by the BACKEND on every record — prefer it when present. */
+  timestamp?: string
+  /** Also stamped server-side; the client never sets it. */
+  tenant_id?: string
   [key: string]: unknown
 }
 
@@ -154,6 +174,17 @@ export interface Health {
 export interface ErrorResponse {
   detail: string
   error?: Record<string, unknown> | null
+}
+
+/**
+ * When a memory was saved.
+ *
+ * The backend stamps `timestamp` on write; the mock and older records carry
+ * `created_at`. Reading only one of them silently drops the date for half the
+ * records, so read both.
+ */
+export function savedAt(metadata: MemoryMetadata): string | undefined {
+  return metadata.timestamp ?? metadata.created_at
 }
 
 /** Chroma distance → a 0–1 closeness for display. Distance 0 = identical. */

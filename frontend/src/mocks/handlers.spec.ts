@@ -8,8 +8,9 @@
  */
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 import { setupServer } from 'msw/node'
+import { HttpResponse, http } from 'msw'
 import { handlers } from './handlers'
-import { api, ApiError } from '@/lib/api'
+import { api, API_BASE_URL, ApiError } from '@/lib/api'
 import { tenantId } from '@/lib/auth'
 
 const server = setupServer(...handlers)
@@ -169,14 +170,16 @@ test('POST /memory/curate returns a report', async () => {
 /* --- errors ---------------------------------------------------------------- */
 
 test('an unreachable API produces an explanation, not "Failed to fetch"', async () => {
-  server.close()
-  try {
-    await api.health()
-    throw new Error('expected a failure')
-  } catch (err) {
-    expect(err).toBeInstanceOf(ApiError)
-    expect((err as ApiError).message).toMatch(/Could not reach the API/)
-  } finally {
-    server.listen({ onUnhandledRequest: 'error' })
-  }
+  // Simulate the network failure rather than relying on nothing listening on
+  // the port: once a real backend is running locally, "close the mock and see
+  // what happens" reaches the actual service and the test silently inverts.
+  server.use(
+    http.get(`${API_BASE_URL}/healthz`, () => HttpResponse.error()),
+  )
+
+  await expect(api.health()).rejects.toSatisfy(
+    (err: unknown) =>
+      err instanceof ApiError && /Could not reach the API/.test(err.message),
+    'an ApiError explaining the API could not be reached',
+  )
 })

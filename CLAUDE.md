@@ -308,3 +308,20 @@ mind → two-speed architecture for volume → gate everything on accuracy.
 - **State your assumptions when presenting numbers.** A benefits case (cost savings,
   latency improvement) without printed assumptions is the first thing a client audit
   committee will discount.
+
+---
+
+## Project context — read on demand
+
+This repo implements a two-tier memory architecture: session-scoped short-term memory and
+user-scoped long-term memory, with a curator deployed on a cron schedule.
+
+- **`BRIEF.md`** — architecture, the decision log and its reasoning, platform object model,
+  and five real bugs in the upstream scripts. Read it before changing anything in the
+  memory layer, or when picking the project up cold.
+- **`PLAN.md`** — build schedule, function contracts, the system prompt, and the code
+  blocks to copy.
+
+These are deliberately **not** `@` imports. `CLAUDE.md` and everything it imports load into
+context on every single turn; these two are long, one-time reads that should be opened when
+they are relevant and not paid for otherwise.

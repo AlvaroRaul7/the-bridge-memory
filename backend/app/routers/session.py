@@ -84,8 +84,11 @@ def send_message_stream(
     `data: <json>\\n\\n` chunks as text arrives instead of blocking for the
     whole reply. Each chunk is one of:
       {"type": "text", "text": ...}
-      {"type": "done", "stop_reason": ..., "tool_uses": [...]}
+      {"type": "done", "stop_reason": ..., "tool_uses": [...], "usage": {...} | None}
       {"type": "error", "message": ...}
+
+    `usage` is this turn's token/cost delta, not the session's running
+    total — see agents.ask_stream()'s docstring for how it's computed.
     """
 
     def event_source():

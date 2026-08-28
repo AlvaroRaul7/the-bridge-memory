@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 
 from .conftest import (
     CUSTOMER_ID,
@@ -12,6 +13,7 @@ from .conftest import (
     idle,
     terminated,
     tool_use,
+    usage_snapshot,
 )
 
 
@@ -178,7 +180,9 @@ def test_stream_yields_deltas_as_they_arrive(client, fake):
     assert [c["text"] for c in text_chunks] == ["Hello ", "world."]
 
     done = chunks[-1]
-    assert done == {"type": "done", "stop_reason": "end_turn", "tool_uses": []}
+    assert done["type"] == "done"
+    assert done["stop_reason"] == "end_turn"
+    assert done["tool_uses"] == []
 
 
 def test_stream_does_not_duplicate_text_already_covered_by_deltas(client, fake):
@@ -249,7 +253,54 @@ def test_stream_deadline_reports_timeout(client, fake, settings_with_timeout):
 
     chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
 
-    assert chunks[-1] == {"type": "done", "stop_reason": "timeout", "tool_uses": []}
+    done = chunks[-1]
+    assert done["type"] == "done"
+    assert done["stop_reason"] == "timeout"
+    assert done["tool_uses"] == []
+
+
+def test_stream_reports_this_turns_usage_as_a_delta(client, fake):
+    """usage in the done event is this turn's cost, not the session's
+    running cumulative total — computed from two retrieve() snapshots
+    taken around the turn."""
+    fake.usage_sequence = [
+        usage_snapshot(input_tokens=1000, output_tokens=200, list_cost=500),
+        usage_snapshot(input_tokens=1150, output_tokens=245, list_cost=800),
+    ]
+    fake.events = [agent_message("hi there", event_id="evt_1"), idle("end_turn")]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    assert fake.retrieved == ["ses_1", "ses_1"]
+    assert chunks[-1]["usage"] == {
+        "input_tokens": 150,
+        "output_tokens": 45,
+        "active_seconds": 0.0,
+        "list_cost": "300",
+        "currency": "USD",
+    }
+
+
+def test_stream_usage_delta_fields_are_none_when_the_api_omits_them(client, fake):
+    """Belt-and-suspenders: if the API ever omits usage fields on
+    retrieve(), don't fabricate numbers out of them."""
+    fake.usage_sequence = [
+        usage_snapshot(input_tokens=1000, output_tokens=200, list_cost=500),
+        SimpleNamespace(
+            input_tokens=None, output_tokens=None, active_seconds=None, list_cost=None
+        ),
+    ]
+    fake.events = [agent_message("hi", event_id="evt_1"), idle("end_turn")]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    assert chunks[-1]["usage"] == {
+        "input_tokens": None,
+        "output_tokens": None,
+        "active_seconds": None,
+        "list_cost": None,
+        "currency": None,
+    }
 
 
 # --- documents (Files API, Tier-3 "growing document sets") -----------------

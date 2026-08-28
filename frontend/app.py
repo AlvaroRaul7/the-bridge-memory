@@ -54,6 +54,7 @@ def stream_agent_reply(session_id: str, text: str):
     alongside the yielded text."""
     st.session_state.stream_stop_reason = None
     st.session_state.stream_tool_uses = []
+    st.session_state.stream_usage = None
     st.session_state.stream_error = None
 
     with requests.post(
@@ -74,8 +75,27 @@ def stream_agent_reply(session_id: str, text: str):
             elif chunk["type"] == "done":
                 st.session_state.stream_stop_reason = chunk["stop_reason"]
                 st.session_state.stream_tool_uses = chunk["tool_uses"]
+                st.session_state.stream_usage = chunk.get("usage")
             elif chunk["type"] == "error":
                 st.session_state.stream_error = chunk["message"]
+
+
+def format_usage(usage: dict | None) -> str | None:
+    """This-turn token/cost caption, e.g. '150 in / 45 out tokens · $0.0030'.
+    list_cost is minor units (cents); None fields are omitted rather than
+    rendered as 0 — the API didn't report them, so don't imply it did."""
+    if not usage:
+        return None
+
+    bits = []
+    if usage.get("input_tokens") is not None or usage.get("output_tokens") is not None:
+        bits.append(
+            f"{usage.get('input_tokens', '?')} in / {usage.get('output_tokens', '?')} out tokens"
+        )
+    if usage.get("list_cost") is not None:
+        dollars = int(usage["list_cost"]) / 100
+        bits.append(f"${dollars:.4f} {usage.get('currency') or ''}".strip())
+    return " · ".join(bits) or None
 
 
 # --- sidebar: shared connection + identity fields ---------------------------
@@ -170,6 +190,8 @@ with tab_session:
     for turn in st.session_state.chat_history:
         with st.chat_message(turn["role"]):
             st.markdown(turn["content"])
+            if turn.get("caption"):
+                st.caption(turn["caption"])
 
     user_message = st.chat_input(
         "Message to the agent",
@@ -181,6 +203,7 @@ with tab_session:
         with st.chat_message("user"):
             st.markdown(user_message)
 
+        caption = None
         with st.chat_message("assistant"):
             try:
                 full_reply = st.write_stream(
@@ -199,10 +222,16 @@ with tab_session:
                     caption_bits.append(f"stop_reason: {stop_reason}")
                 if tool_uses:
                     caption_bits.append(f"{len(tool_uses)} tool call(s)")
+                usage_bit = format_usage(st.session_state.stream_usage)
+                if usage_bit:
+                    caption_bits.append(usage_bit)
                 if caption_bits:
-                    st.caption(" · ".join(caption_bits))
+                    caption = " · ".join(caption_bits)
+                    st.caption(caption)
 
-        st.session_state.chat_history.append({"role": "assistant", "content": full_reply})
+        st.session_state.chat_history.append(
+            {"role": "assistant", "content": full_reply, "caption": caption}
+        )
 
     st.divider()
     with st.expander("What has the agent remembered? (native store, source=agent)"):

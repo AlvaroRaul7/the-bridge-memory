@@ -47,6 +47,19 @@ def tool_use(name: str, **payload: Any) -> SimpleNamespace:
     return SimpleNamespace(type="agent.tool_use", name=name, input=payload)
 
 
+def usage_snapshot(
+    input_tokens: int, output_tokens: int, list_cost: int, currency: str = "USD"
+) -> SimpleNamespace:
+    """One cumulative-usage snapshot, as returned by sessions.retrieve().
+    list_cost is minor units (matches the real API's string-amount shape)."""
+    return SimpleNamespace(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        active_seconds=0.0,
+        list_cost=SimpleNamespace(amount=str(list_cost), currency=currency),
+    )
+
+
 def content_delta(event_id: str, text: str) -> SimpleNamespace:
     return SimpleNamespace(
         type="event_delta",
@@ -139,17 +152,18 @@ class FakeSessions:
         )
 
     def retrieve(self, session_id: str, **_: Any) -> SimpleNamespace:
-        return SimpleNamespace(
-            id=session_id,
-            status="idle",
-            title="chat",
-            created_at=NOW,
-            usage=SimpleNamespace(
+        self._owner.retrieved.append(session_id)
+        if self._owner.usage_sequence:
+            usage = self._owner.usage_sequence.pop(0)
+        else:
+            usage = SimpleNamespace(
                 input_tokens=120,
                 output_tokens=45,
                 active_seconds=3.5,
                 list_cost=SimpleNamespace(amount="17", currency="USD"),
-            ),
+            )
+        return SimpleNamespace(
+            id=session_id, status="idle", title="chat", created_at=NOW, usage=usage
         )
 
 
@@ -200,6 +214,8 @@ class FakeClient:
         self.created: list[dict] = []
         self.sent: list[tuple[str, list[dict]]] = []
         self.streamed: list[str] = []
+        self.retrieved: list[str] = []
+        self.usage_sequence: list[Any] = []
         self.memories: list[Any] = []
         self.listed: list[tuple[str, dict]] = []
         self.deleted: list[tuple[str, str]] = []

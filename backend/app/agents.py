@@ -70,6 +70,34 @@ def _usage(session: Any) -> SessionUsage | None:
     )
 
 
+def _usage_delta(before: SessionUsage | None, after: SessionUsage | None) -> SessionUsage | None:
+    """This-turn usage, computed as after-minus-before cumulative snapshots.
+
+    The API only reports usage cumulatively per session, not per turn, so a
+    per-message cost means diffing two GET-session snapshots taken around
+    the turn. list_cost is minor units as a string — integer subtraction,
+    no float rounding.
+    """
+    if after is None:
+        return None
+
+    def _sub(a: float | None, b: float | None) -> float | None:
+        return None if a is None else a - (b or 0)
+
+    list_cost = None
+    if after.list_cost is not None:
+        before_cost = int(before.list_cost) if before and before.list_cost is not None else 0
+        list_cost = str(int(after.list_cost) - before_cost)
+
+    return SessionUsage(
+        input_tokens=_sub(after.input_tokens, before.input_tokens if before else None),
+        output_tokens=_sub(after.output_tokens, before.output_tokens if before else None),
+        active_seconds=_sub(after.active_seconds, before.active_seconds if before else None),
+        list_cost=list_cost,
+        currency=after.currency,
+    )
+
+
 def _session_response(session: Any, memory_store_id: str) -> SessionResponse:
     return SessionResponse(
         id=session.id,
@@ -306,7 +334,7 @@ def ask_stream(
 
     Yields dicts:
       {"type": "text", "text": <fragment>}
-      {"type": "done", "stop_reason": ..., "tool_uses": [...]}
+      {"type": "done", "stop_reason": ..., "tool_uses": [...], "usage": {...} | None}
       {"type": "error", "message": ...}
     """
     tool_uses: list[ToolUse] = []
@@ -317,6 +345,8 @@ def ask_stream(
     content = _message_content(session_id, text)
 
     try:
+        usage_before = _usage(client.beta.sessions.retrieve(session_id))
+
         with client.beta.sessions.events.stream(
             session_id, event_deltas=["agent.message"]
         ) as stream:
@@ -375,14 +405,18 @@ def ask_stream(
 
                 if time.monotonic() > deadline:
                     break
+
+        usage_after = _usage(client.beta.sessions.retrieve(session_id))
     except Exception as exc:  # noqa: BLE001 - reported to the client, not swallowed
         yield {"type": "error", "message": str(exc)}
         return
 
+    turn_usage = _usage_delta(usage_before, usage_after)
     yield {
         "type": "done",
         "stop_reason": stop_reason,
         "tool_uses": [t.model_dump() for t in tool_uses],
+        "usage": turn_usage.model_dump() if turn_usage else None,
     }
 
 

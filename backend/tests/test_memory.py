@@ -11,7 +11,7 @@ import app.routers.memory as memory_router
 from app.schemas import CurationReport
 from memory_engine.schemas import MemoryHit, MemoryRecord
 
-from .conftest import STORE_ID, memory_item, memory_prefix
+from .conftest import CUSTOMER_ID, STORE_ID, memory_item, memory_prefix
 
 
 def test_create_memory_writes_and_returns_id(client, monkeypatch):
@@ -141,17 +141,23 @@ def test_list_defaults_to_the_agent_store(client, fake):
         memory_item("mem_1", "/access-policy.md", size=17),
     ]
 
-    body = client.get("/memory").json()
+    body = client.get("/memory", params={"customer_id": CUSTOMER_ID}).json()
 
     assert body["source"] == "agent"
     assert body["memory_store_id"] == STORE_ID
     assert [m["path"] for m in body["memories"]] == ["/access-policy.md", "/team.md"]
 
 
+def test_agent_source_requires_customer_id(client):
+    response = client.get("/memory")
+    assert response.status_code == 422
+    assert "customer_id" in response.json()["detail"]
+
+
 def test_agent_listing_separates_directory_nodes(client, fake):
     fake.memories = [memory_item("mem_1", "/a.md"), memory_prefix("/notes")]
 
-    body = client.get("/memory").json()
+    body = client.get("/memory", params={"customer_id": CUSTOMER_ID}).json()
 
     assert [m["path"] for m in body["memories"]] == ["/a.md"]
     assert body["prefixes"] == ["/notes"]
@@ -160,9 +166,10 @@ def test_agent_listing_separates_directory_nodes(client, fake):
 def test_agent_content_is_withheld_unless_asked_for(client, fake):
     fake.memories = [memory_item("mem_1", "/a.md", content="the body")]
 
-    assert client.get("/memory").json()["memories"][0]["content"] is None
+    params = {"customer_id": CUSTOMER_ID}
+    assert client.get("/memory", params=params).json()["memories"][0]["content"] is None
 
-    body = client.get("/memory", params={"include_content": True}).json()
+    body = client.get("/memory", params={**params, "include_content": True}).json()
     assert body["memories"][0]["content"] == "the body"
     assert fake.listed[-1][1]["view"] == "full"
 
@@ -170,14 +177,24 @@ def test_agent_content_is_withheld_unless_asked_for(client, fake):
 def test_agent_delete_removes_the_file(client, fake):
     fake.memories = [memory_item("mem_1", "/a.md")]
 
-    body = client.delete("/memory/mem_1", params={"source": "agent"}).json()
+    body = client.delete(
+        "/memory/mem_1", params={"source": "agent", "customer_id": CUSTOMER_ID}
+    ).json()
 
     assert body == {"id": "mem_1", "deleted": True}
     assert fake.deleted == [("mem_1", STORE_ID)]
 
 
+def test_agent_delete_requires_customer_id(client):
+    response = client.delete("/memory/mem_1", params={"source": "agent"})
+    assert response.status_code == 422
+    assert "customer_id" in response.json()["detail"]
+
+
 def test_agent_delete_of_unknown_id_is_404(client):
-    response = client.delete("/memory/mem_nope", params={"source": "agent"})
+    response = client.delete(
+        "/memory/mem_nope", params={"source": "agent", "customer_id": CUSTOMER_ID}
+    )
     assert response.status_code == 404
 
 

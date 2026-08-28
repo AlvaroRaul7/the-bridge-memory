@@ -27,8 +27,7 @@ from memory_engine import (
 )
 
 from .. import agents, curator
-from ..config import Settings
-from ..deps import get_client, get_settings, require_api_key
+from ..deps import get_client, require_api_key
 from ..schemas import (
     AgentMemoryListResponse,
     CurateRequest,
@@ -74,11 +73,11 @@ def list_memories(
             "wrote during its sessions; 'chroma' is the vector tier."
         ),
     ),
+    customer_id: str | None = Query(default=None, description="Required when source=agent."),
     tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
     path_prefix: str = Query(default="/", description="Only used when source=agent."),
     include_content: bool = Query(default=False, description="Only used when source=agent."),
     client: Anthropic = Depends(get_client),
-    settings: Settings = Depends(get_settings),
 ) -> AgentMemoryListResponse | MemoryListResponse:
     """List long-term memory.
 
@@ -89,9 +88,15 @@ def list_memories(
     store, and defaulting to Chroma answered that question with an empty list.
     """
     if source == "agent":
+        if not customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="customer_id is required when source=agent.",
+            )
+        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
         return agents.list_store_memories(
             client,
-            memory_store_id=settings.memory_store_id,
+            memory_store_id=memory_store_id,
             path_prefix=path_prefix,
             include_content=include_content,
         )
@@ -119,14 +124,18 @@ def delete_memory(
             "and a wrong guess destroys data."
         ),
     ),
+    customer_id: str | None = Query(default=None, description="Required when source=agent."),
     tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
     client: Anthropic = Depends(get_client),
-    settings: Settings = Depends(get_settings),
 ) -> DeletedMemory:
     if source == "agent":
-        agents.delete_store_memory(
-            client, memory_id, memory_store_id=settings.memory_store_id
-        )
+        if not customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="customer_id is required when source=agent.",
+            )
+        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
+        agents.delete_store_memory(client, memory_id, memory_store_id=memory_store_id)
         return DeletedMemory(id=memory_id)
 
     if not tenant_id:

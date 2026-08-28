@@ -1,71 +1,67 @@
-# Team notes — after the Spec 2 backend merge
+# Team notes — Spec 4
 
 Esteban · deployment on Managed Agents
 
-Three things worth saying now that `5067e32` is on `main`. The first two are
-repo hygiene, the third decides whether a whole workstream is alive or dead.
+Written against `c6d4a76`. One finding that needs a decision, one thing the
+merge left behind, and one note for Spec 3.
 
 ---
 
 ## Message ready to paste into chat
 
-> Read the merged backend — it's good, and it settles the architecture argument
-> by itself: it's a proxy over Managed Agents using the **native** memory store
-> (`/mnt/memory/`), with no vector store and no `memory_engine` import. I'm
-> re-pointing Spec 4 at that and I'm not building the Chroma integration.
-> Three things though:
+> Read the two-tier backend after #6 and #7 landed. It's good, and it makes the
+> architecture concrete: `/session` over the agent's native `/mnt/memory/`, and
+> `/memory` over the tenant-scoped Chroma tier. One gap though, and it's the
+> important one:
 >
-> **1. `BRIEF.md` was deleted in that commit** (`966eee7`). Deliberate or a
-> rebase accident? `CLAUDE.md` still tells people to read it before touching the
-> memory layer, so right now that pointer is broken. If it was accidental:
-> `git show f5022b8:BRIEF.md > BRIEF.md`. If it was deliberate, I'll fix the
-> `CLAUDE.md` reference instead — just tell me which.
+> **Nothing writes to the long-term tier except a human with curl.**
+> `agents.py` doesn't import `memory_engine`, and the agent can't call
+> `/memory/*` because it runs on Anthropic's servers, not ours. So the Chroma
+> tier is a database nobody fills — and the "promotion moment", the thing that
+> makes the demo more than a chatbot with a notepad, has no mechanism behind it.
 >
-> **2. `feature/memory-engine-chromadb` is orphaned.** Spec 1's engine is one
-> unmerged commit and nothing on `main` imports it. Either it lands and the
-> backend grows a second memory path, or we call it out of scope now and stop
-> spending time on it. My vote: out of scope — the merged design is simpler and
-> already tested.
+> That's exactly the gap Spec 4 was written to close, so I'm taking it: give the
+> agent two tools, `search_memory` → `GET /memory/search` and `write_memory` →
+> `POST /memory`, so a consolidation turn promotes facts into Chroma. Plan is in
+> `specs/04-deployment/tasks/05-connect-long-term-tier.md`. It needs the backend
+> reachable from the internet (the agent's sandbox is outside our network), which
+> is a `cloudflared` tunnel and a key in an Anthropic vault — no change to
+> `backend/`.
 >
-> **3. Spec 3: the API you're coding against is `backend/README.md`**, not
-> anything in `specs/`. `POST /session`, `POST /session/{id}/message`,
-> `GET /memory`. Two things to know: `/message` blocks for the whole agent turn
-> (tens of seconds — put a spinner on it), and each response carries
-> `tool_uses[]` with `touched_memory: true` on the calls that hit the store.
-> That flag is your "what did it remember this turn" panel, for free.
->
-> I need one thing from whoever owns the backend: it reads `AGENT_ID` /
-> `ENVIRONMENT_ID` / `MEMORY_STORE_ID` from env, falling back to the dotfiles.
-> I'm provisioning a v2 agent on `claude-opus-5` with a better memory prompt and
-> writing `.agent_id_v2` etc., so the backend gets pointed at it with env vars.
-> Nothing in `backend/` changes.
+> Two smaller things: **`BRIEF.md` was deleted in `966eee7`** while `CLAUDE.md`
+> still tells people to read it before touching the memory layer — deliberate, or
+> a rebase accident? And **Spec 3: the API you code against is
+> `backend/README.md`**; note `/session/{id}/message` blocks for the whole agent
+> turn (tens of seconds, put a spinner on it) and every response carries
+> `tool_uses[]` with `touched_memory` — that's your "what did it remember this
+> turn" panel, for free.
 
 ---
 
 ## Detail, in case anyone asks
 
-### Why I dropped the ChromaDB integration from Spec 4
+### The gap, precisely
 
-Spec 4 was written as "make the Managed Agent call Spec 2's FastAPI as its
-memory backend". The merged backend is the opposite: it calls the agent, and the
-agent's memory is the platform's own mounted store. Building the Chroma path on
-top would give the agent two places to write and nobody would be able to say, on
-stage, where a given fact ended up. One source of truth is worth more than one
-extra buzzword in the pitch.
+Checked on `c6d4a76`: the only callers of `memory_engine.write_memory` are
+`backend/app/routers/memory.py` and the tests. `backend/app/agents.py` imports
+`anthropic` and `schemas` and nothing else. The agent's session container has no
+route to `/memory/*` — it runs in Anthropic's infrastructure and the backend
+listens on a laptop.
 
-What Spec 4 still owns, unchanged: provisioning the agent the backend talks to,
-where each piece runs, what secrets it needs, and proving the whole thing works
-end to end.
+So today a fact reaches long-term memory only if a person, or Spec 3's UI, posts
+it. That is a legitimate design — but it means the agent is not the one deciding
+what deserves to be remembered, which is the sentence the whole pitch rests on.
 
-### What did not change
+### Why the agent calls out rather than the backend calling in
 
-The deployment constraint is the same as it always was: **Managed Agents deploys
-agents, not web apps**. `backend/` and Spec 3's frontend run on a host of ours.
-The container Anthropic gives us is per-session and ephemeral, with no public
-ingress.
+Only one of the two can initiate. The backend already calls the agent for chat;
+having it also *extract* memories after each turn would mean a second model call
+per turn and a judgement made outside the agent's own reasoning. Giving the agent
+the tools keeps the decision where the demo says it is, and costs one tunnel.
 
-### A risk that is now smaller
+### What has not changed
 
-Memory is hosted by Anthropic again, not by us. If our backend dies mid-demo,
-the memory survives and we can fall back to `run_session_1.py`. That is a better
-position than the one the Chroma design put us in.
+**Managed Agents deploys agents, not web apps.** `backend/` and Spec 3's
+frontend run on a host of ours; the agent's container is per-session, ephemeral,
+and has no public ingress. Chroma Cloud is hosted, so it is not affected either
+way.

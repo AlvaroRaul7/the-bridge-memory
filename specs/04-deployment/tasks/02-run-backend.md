@@ -23,15 +23,17 @@ Spec 2 problem — report it before going further, do not work around it.
 
 ### 2. Start the service pointed at the v2 objects
 
-Configuration lives in a git-ignored `.env` at the repo root (`ANTHROPIC_API_KEY`,
-`BACKEND_API_KEY`, the three resource IDs, `CORS_ORIGINS`,
-`AGENT_TIMEOUT_SECONDS`). The backend reads plain environment variables and does
-**not** load `.env` itself, so load it explicitly. From `backend/`:
+Configuration lives in a git-ignored `.env` at the repo root — copy
+`.env.example` and fill it in. Since `c6d4a76` the backend reads it through
+`python-dotenv`, so a `.env` in the repo root is picked up without exporting
+anything. From `backend/`:
 
 ```bash
-uvicorn --env-file ../.env app.main:app --port 8010
-# or: set -a; . ../.env; set +a; uvicorn app.main:app --port 8010
+uvicorn app.main:app --port 8010
 ```
+
+The Chroma tier needs `CHROMA_API_KEY` / `CHROMA_TENANT` / `CHROMA_DATABASE`
+too — those belong to Spec 1, ask whoever provisioned the Chroma Cloud account.
 
 Environment variables win over the dotfiles, so the original demo's `.agent_id`
 is untouched and both can coexist.

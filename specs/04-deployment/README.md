@@ -2,11 +2,11 @@
 
 **Owner:** Esteban · **Spec:** [`../04-deployment-managed-agents.md`](../04-deployment-managed-agents.md)
 
-> **Rewritten after `5067e32` (Spec 2 backend) landed on `main`.** The merged
-> backend is a **proxy over Managed Agents using the native memory store**, not
-> a ChromaDB memory service the agent calls. That inverts the direction of
-> traffic and removes most of what this spec originally described. See
-> [`TEAM-NOTES.md`](TEAM-NOTES.md) for what that means for the team.
+> **Written against `c6d4a76`.** The backend is now two-tiered: `/session` over
+> the agent's native `/mnt/memory/` mount, and `/memory` over the tenant-scoped
+> ChromaDB tier. Nothing currently writes to that second tier except a human
+> with `curl` — closing that is task 05, and it is the part of this spec that
+> matters most. See [`TEAM-NOTES.md`](TEAM-NOTES.md).
 
 ---
 
@@ -27,14 +27,12 @@ access to what the agent wrote. Its `ask()` already has the idle gate right.
 
 Consequences for this spec:
 
-- **No tunnel is needed for the agent.** The only thing that may need a public
-  address is the backend, and only if Spec 3's frontend does not run on the
-  same machine.
-- **No vault, no secret inside the sandbox.** The Anthropic key stays on the
-  backend host, where it always was.
-- **Long-term memory is `/mnt/memory/` again.** The Chroma engine
-  (`feature/memory-engine-chromadb`) is not merged and the backend explicitly
-  does not import it.
+- **For the `/session` tier, no tunnel is needed.** The backend calls the agent;
+  the agent calls nobody.
+- **For the Chroma tier, one is** — the agent has to reach `/memory/*` from
+  outside our network, which is task 05.
+- **Chroma Cloud is hosted**, so the long-term tier does not depend on our
+  laptop staying up. The backend in front of it does.
 
 **Unchanged hard constraint:** neither the backend nor the frontend can be
 deployed on Managed Agents. That platform deploys agents, not web apps.
@@ -77,6 +75,7 @@ story, just pointing the other way:
 | [02](tasks/02-run-backend.md) | Backend running against those objects | A local API answering `/healthz` and `/session` | yes |
 | [03](tasks/03-two-session-proof.md) | The two-session proof through the backend | `outputs/session1_v2.txt`, `session2_v2.txt` | yes |
 | [04](tasks/04-deployment-doc.md) | `DEPLOYMENT.md` | Deliverable 3 of the spec | no |
+| [05](tasks/05-connect-long-term-tier.md) | Agent → the Chroma tier | The promotion moment actually promoting | yes |
 
 **Out of scope here:** the cron-scheduled curator (`depl_`) belongs to track C of
 `PLAN.md`. If it gets built it needs its own `resources` block with the memory

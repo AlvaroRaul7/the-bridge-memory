@@ -217,6 +217,14 @@ is `claude-opus-5` and that `web_search` / `web_fetch` are off.
 - [ ] `git diff` is empty for `create_agent.py` and everything under `backend/`
 - [ ] The agent looks right in the Console
 
+## Note on tier naming
+
+`c6d4a76` made the backend two-tiered: `/session` over the agent's native
+`/mnt/memory/` mount, and `/memory` over the tenant-scoped ChromaDB tier. This
+prompt governs the first one only, so it says "your notes" rather than
+"long-term memory" — the agent cannot reach the Chroma tier yet. Connecting it
+is [task 05](05-connect-long-term-tier.md).
+
 ## Verified on 2026-08-28
 
 - Ran against `anthropic 1.2.0`, Python 3.12.9. All three objects created on the

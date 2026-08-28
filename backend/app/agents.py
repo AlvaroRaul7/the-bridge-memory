@@ -11,18 +11,11 @@ fix — see `ask()`.
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable
+from typing import Any
 
 from anthropic import Anthropic
 
-from .schemas import (
-    MemoryListResponse,
-    MemoryRecord,
-    MessageResponse,
-    SessionResponse,
-    SessionUsage,
-    ToolUse,
-)
+from .schemas import MessageResponse, SessionResponse, SessionUsage, ToolUse
 
 MEMORY_MOUNT = "/mnt/memory"
 
@@ -183,65 +176,3 @@ def ask(
         tool_uses=tool_uses,
     )
 
-
-# --- memory (read-only proxy) -----------------------------------------------
-
-
-def list_memories(
-    client: Anthropic,
-    *,
-    memory_store_id: str,
-    path_prefix: str = "/",
-    include_content: bool = False,
-) -> MemoryListResponse:
-    """List what the agent has written to the store.
-
-    Sorted client-side: the list endpoint no longer honours `order_by` (see the
-    note in inspect_memory.py), and a stable order matters for a UI panel.
-    """
-    page = client.beta.memory_stores.memories.list(
-        memory_store_id,
-        path_prefix=path_prefix,
-        view="full" if include_content else "basic",
-    )
-
-    memories: list[MemoryRecord] = []
-    prefixes: list[str] = []
-
-    for item in _iter_page(page):
-        if getattr(item, "type", None) == "memory_prefix":
-            prefixes.append(item.path)
-            continue
-
-        memories.append(
-            MemoryRecord(
-                id=item.id,
-                path=item.path,
-                size_bytes=getattr(item, "content_size_bytes", None),
-                created_at=getattr(item, "created_at", None),
-                updated_at=getattr(item, "updated_at", None),
-                content=getattr(item, "content", None) if include_content else None,
-            )
-        )
-
-    memories.sort(key=lambda m: m.path)
-    prefixes.sort()
-
-    return MemoryListResponse(
-        memory_store_id=memory_store_id, memories=memories, prefixes=prefixes
-    )
-
-
-def delete_memory(
-    client: Anthropic, memory_id: str, *, memory_store_id: str
-) -> str:
-    client.beta.memory_stores.memories.delete(
-        memory_id, memory_store_id=memory_store_id
-    )
-    return memory_id
-
-
-def _iter_page(page: Any) -> Iterable[Any]:
-    """Iterate a cursor page without assuming it auto-paginates."""
-    data = getattr(page, "data", None)
-    return data if data is not None else page

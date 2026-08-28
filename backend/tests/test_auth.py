@@ -10,6 +10,7 @@ import pytest
     [
         ("get", "/memory"),
         ("delete", "/memory/mem_1"),
+        ("post", "/memory/curate"),
         ("get", "/session/ses_1"),
         ("post", "/session"),
     ],

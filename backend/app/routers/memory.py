@@ -13,6 +13,7 @@ extra filters but can never widen it past its own tenant.
 
 from __future__ import annotations
 
+from anthropic import Anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from memory_engine import (
@@ -23,8 +24,11 @@ from memory_engine import (
     write_memory,
 )
 
-from ..deps import require_api_key
+from .. import curator
+from ..deps import get_client, require_api_key
 from ..schemas import (
+    CurateRequest,
+    CurationReport,
     DeletedMemory,
     MemoryHit,
     MemoryListResponse,
@@ -79,3 +83,12 @@ def delete_memory(
 
     engine_delete_memory(memory_id)
     return DeletedMemory(id=memory_id)
+
+
+@router.post("/curate", response_model=CurationReport)
+def curate_memory(
+    body: CurateRequest, client: Anthropic = Depends(get_client)
+) -> CurationReport:
+    """Tier-1 stretch goal: the memory-curator pattern, over this tenant's
+    long-term Chroma memories rather than the native /mnt/memory/ store."""
+    return curator.curate(client, body.tenant_id)

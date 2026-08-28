@@ -8,6 +8,7 @@ the repo root. No Chroma client, no network.
 from __future__ import annotations
 
 import app.routers.memory as memory_router
+from app.schemas import CurationReport
 from memory_engine.schemas import MemoryHit, MemoryRecord
 
 
@@ -94,3 +95,29 @@ def test_delete_memory_404_when_not_owned_or_missing(client, monkeypatch):
     assert response.status_code == 404
     assert response.json()["detail"] == "Not found."
     assert called == []
+
+
+def test_curate_route_delegates_to_the_curator_with_the_request_client(client, fake, monkeypatch):
+    calls = []
+    report = CurationReport(merged=["mem-2"], summary="Merged one duplicate.")
+    monkeypatch.setattr(
+        memory_router.curator,
+        "curate",
+        lambda passed_client, tenant_id: calls.append((passed_client, tenant_id)) or report,
+    )
+
+    response = client.post("/memory/curate", json={"tenant_id": "tenant-a"})
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "merged": ["mem-2"],
+        "pruned": [],
+        "contradictions": [],
+        "summary": "Merged one duplicate.",
+    }
+    assert calls == [(fake, "tenant-a")]
+
+
+def test_curate_route_requires_tenant_id(client):
+    response = client.post("/memory/curate", json={})
+    assert response.status_code == 422

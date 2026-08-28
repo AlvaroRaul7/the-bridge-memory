@@ -120,6 +120,36 @@ class DeletedMemory(BaseModel):
     deleted: bool = True
 
 
+# --- memory curator ----------------------------------------------------------
+#
+# Tier-1 stretch goal: the "memory curator" pattern, but over the ChromaDB
+# long-term tier rather than the native /mnt/memory/ store (see
+# backend/app/curator.py).
+
+
+class CurateRequest(BaseModel):
+    tenant_id: str = Field(min_length=1)
+
+
+class Contradiction(BaseModel):
+    ids: list[str]
+    reason: str
+
+
+class CurationReport(BaseModel):
+    merged: list[str] = Field(
+        default_factory=list, description="Ids deleted for being a duplicate of another."
+    )
+    pruned: list[str] = Field(
+        default_factory=list, description="Ids deleted for being stale/ephemeral."
+    )
+    contradictions: list[Contradiction] = Field(
+        default_factory=list,
+        description="Flagged, not deleted — a human needs to resolve these.",
+    )
+    summary: str
+
+
 # --- misc -------------------------------------------------------------------
 
 

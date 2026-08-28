@@ -1,0 +1,262 @@
+{
+  "$comment": "Single source of truth for the four scenario cards. Read by the Python session scripts (scenarios.py) and by the UI (ui/src/lib/scenarios.ts loads this at build time). Add a card here and both sides pick it up.",
+  "version": 1,
+  "scenarios": [
+    {
+      "id": "card-a-onboarding",
+      "card": "A",
+      "name": "New-Hire Onboarding Agent",
+      "shortName": "Onboarding",
+      "domain": "BTS-Synthetic Engineering",
+      "accent": "blue",
+      "persona": "An agent that helps new engineering hires answer onboarding questions \u2014 how to get prod access, who owns which service, what the git workflow is.",
+      "systemPromptFocus": "company policies, org structure, service ownership, and the current version of every process a new hire has to follow",
+      "testQuestion": "I just joined the company and I need read-only prod access to debug an issue tomorrow. What do I do? Be specific about the steps and the people I need to talk to.",
+      "docsDir": "synthetic-data/card-a-onboarding",
+      "round1Summary": "Onboarding handbook, team directory, production access policy (January 2026).",
+      "round2Summary": "A May 2026 policy update that replaces the prod-access workflow, and a post-re-org team directory.",
+      "successCriteria": [
+        "Cites the 2026-05-15 policy, not the January 2026 one",
+        "Does NOT recommend the Slack ticket + SRE pairing session workflow",
+        "Names the certification + just-in-time IAM flow instead",
+        "Notes the tenure requirement dropped from 2 weeks to 3 working days",
+        "Flags that the prod-access flow changed since the last session",
+        "Uses the current org (Yuki Tanaka as Head of Engineering, not Anika Reddy)"
+      ],
+      "contradictions": [
+        {
+          "topic": "Read-only prod access trigger",
+          "round1": "Open a ticket in #sre-access-requests, tag your manager + the SRE on rota, complete a 30-minute pairing session.",
+          "round2": "Complete the Prod Access Foundations course, then request just-in-time 4-hour access through the IAM platform. No Slack ticket, no pairing session.",
+          "severity": "high"
+        },
+        {
+          "topic": "Tenure requirement",
+          "round1": "2 weeks of tenure before read-only access.",
+          "round2": "3 working days. Certification and access from day 4.",
+          "severity": "high"
+        },
+        {
+          "topic": "Head of Engineering",
+          "round1": "Anika Reddy.",
+          "round2": "Yuki Tanaka (effective 2026-04-15). Anika moved to Chief AI Officer.",
+          "severity": "medium"
+        },
+        {
+          "topic": "payment-service tech lead",
+          "round1": "Tom Bryce.",
+          "round2": "Maya Patel. Tom Bryce is now Head of Platform.",
+          "severity": "medium"
+        }
+      ],
+      "headline": "Your onboarding co-pilot",
+      "clientSummary": "Ask anything about how engineering works here \u2014 access requests, who owns what, the release process. It reads the current handbook and policies, and it keeps up when they change, so you are never told to follow last quarter\u2019s process.",
+      "knows": [
+        "Company policies and the date each one took effect",
+        "Who holds which role, and who owns each service",
+        "The steps for common requests, and who signs them off"
+      ],
+      "sampleQuestions": [
+        "I just joined and I need read-only prod access to debug an issue tomorrow. What do I do?",
+        "Who owns the payments service, and who do I talk to about a bug in it?",
+        "What is our git workflow for getting a change merged?",
+        "How long before I can get read-write production access?",
+        "Who is the Head of Engineering?"
+      ]
+    },
+    {
+      "id": "card-b-customer-success",
+      "card": "B",
+      "name": "Customer Success Specialist Agent",
+      "shortName": "Customer Success",
+      "domain": "Acme Corp (enterprise account)",
+      "accent": "emerald",
+      "persona": "An agent that supports a CSM looking after a specific enterprise customer. It remembers the account's history, open issues, contract terms and key contacts.",
+      "systemPromptFocus": "account history, contract terms, open escalations, and who currently holds which role on the customer side",
+      "testQuestion": "Acme's CTO Sarah just emailed asking for a renewal proposal. What should we know going in?",
+      "docsDir": "synthetic-data/card-b-customer-success",
+      "round1Summary": "Acme account history, contract summary (ACME-2025-003), rolling support ticket log.",
+      "round2Summary": "A leadership change, contract Amendment No. 1, and a new P1 ticket from the new CTO.",
+      "successCriteria": [
+        "Corrects the premise: Sarah Chen is no longer CTO \u2014 Devon Ellis is, as of 2026-05-01",
+        "Notes Sarah moved to Chief Strategy Officer and has no budget authority",
+        "References Amendment No. 1: ARR is $688k, not $840k; 400 seats, not 500",
+        "Flags the new termination-for-convenience right from 2027-04-01",
+        "Surfaces ticket ACME-4419 and the overdue RCA as the thing to address before commercials",
+        "Notes Hiro Nakamura's departure left the internal-advocate seat vacant"
+      ],
+      "contradictions": [
+        {
+          "topic": "Who is Acme's CTO",
+          "round1": "Sarah Chen, promoted to CTO in 2025-08. Our champion and exec sponsor.",
+          "round2": "Devon Ellis, effective 2026-05-01. Sarah moved to Chief Strategy Officer with no budget authority.",
+          "severity": "high"
+        },
+        {
+          "topic": "Contract value and seats",
+          "round1": "$840,000 ARR, 500 seats, 4% uplift cap, no termination for convenience.",
+          "round2": "$688,000 ARR, 400 seats, 2.5% uplift cap, termination for convenience from 2027-04-01.",
+          "severity": "high"
+        },
+        {
+          "topic": "Support SLA exposure",
+          "round1": "P2 response 4 business hours; service credits capped at 30% of monthly fee.",
+          "round2": "P2 response 2 business hours; credits capped at 50%. Already breached on ACME-4419.",
+          "severity": "high"
+        },
+        {
+          "topic": "Internal advocate",
+          "round1": "Hiro Nakamura, staff engineer, runs the internal user community. Strongest advocate.",
+          "round2": "Left Acme in March 2026 for a competitor. No replacement.",
+          "severity": "medium"
+        }
+      ],
+      "headline": "Your account brain for Acme Corp",
+      "clientSummary": "Everything this account has told us, in one place. Contract terms, open escalations, who actually makes decisions. Ask before a call and it will tell you what changed since the last one \u2014 including when the person you were about to email is no longer the right contact.",
+      "knows": [
+        "Contract terms, amendments, and what they cost us",
+        "Every open ticket and how overdue it is",
+        "Who holds which role on the customer side, today"
+      ],
+      "sampleQuestions": [
+        "Acme\u2019s CTO Sarah just emailed asking for a renewal proposal. What should we know going in?",
+        "What is our current contract value and term with Acme?",
+        "Who are the key contacts at Acme right now?",
+        "What would Acme raise in a renewal conversation?",
+        "What is the single biggest risk on this account?"
+      ]
+    },
+    {
+      "id": "card-c-ma-diligence",
+      "card": "C",
+      "name": "M&A Diligence Analyst",
+      "shortName": "M&A Diligence",
+      "domain": "Project Lighthouse / Helios Data Systems",
+      "accent": "amber",
+      "persona": "An agent supporting an M&A team diligencing a target company. It tracks what has been learned across successive data-room tranches and revises its risk view as disclosures land.",
+      "systemPromptFocus": "financial figures and their provenance, disclosed and undisclosed liabilities, IP chain of title, and every management representation with the date it was made",
+      "testQuestion": "Give me your current risk assessment of this acquisition.",
+      "docsDir": "synthetic-data/card-c-ma-diligence",
+      "round1Summary": "Tranche 1: financial summary (unaudited FY2025), org chart, IP portfolio.",
+      "round2Summary": "Tranche 3: audited restatement, previously undisclosed liabilities, revised IP position.",
+      "successCriteria": [
+        "Explicitly says this contradicts the risk rating it gave last session",
+        "Raises the overall rating from MODERATE to HIGH",
+        "Flags the FY2025 restatement: revenue $62.4M \u2192 $54.9M, EBITDA $7.8M \u2192 $0.4M",
+        "Identifies the false management representation of 2026-02-06 re: no litigation",
+        "Flags US-11,644,190 as licensed-not-owned with a change-of-control termination right",
+        "Flags Meridian Logistics non-renewal \u2014 the largest customer, undisclosed in tranche 1",
+        "Re-runs the valuation: 9.5x revenue against a 6.5x\u20139.0x comp range"
+      ],
+      "contradictions": [
+        {
+          "topic": "FY2025 revenue and EBITDA",
+          "round1": "$62.4M revenue, 39% growth, $7.8M EBITDA (unaudited management accounts).",
+          "round2": "$54.9M revenue, 23% growth, $0.4M EBITDA (audited restatement).",
+          "severity": "high"
+        },
+        {
+          "topic": "Litigation",
+          "round1": "Management represented on 2026-02-06 that there is no pending or threatened litigation.",
+          "round2": "Three matters filed 2025-08 through 2025-11, all predating that representation. $14M trade-secret claim outstanding.",
+          "severity": "high"
+        },
+        {
+          "topic": "Ownership of US-11,644,190",
+          "round1": "Owned outright.",
+          "round2": "Sold to Ridgeline Systems in 2022; held under a non-sublicensable licence that terminates on change of control. Consent not sought.",
+          "severity": "high"
+        },
+        {
+          "topic": "Customer concentration",
+          "round1": "No customer above 10%. Meridian Logistics at 9.2%. Within comfort threshold.",
+          "round2": "Meridian served notice of non-renewal on 2026-03-04, effective 2026-09-30. Not disclosed in tranche 1 or 2.",
+          "severity": "high"
+        },
+        {
+          "topic": "Open source posture",
+          "round1": "No copyleft code. SBOM shows 412 permissive dependencies.",
+          "round2": "SBOM covered direct dependencies only. One AGPL-3.0 component linked into the shipped binary. 4\u20137 engineer-months to remediate.",
+          "severity": "medium"
+        }
+      ],
+      "headline": "Your diligence memory for Project Lighthouse",
+      "clientSummary": "Tracks what the target has told us across every data-room tranche, and when. Ask for a read and it will give you a current risk view \u2014 and tell you plainly when new disclosure contradicts what it concluded before.",
+      "knows": [
+        "Every financial figure and whether it is audited",
+        "Each management representation, with the date it was made",
+        "Disclosed liabilities, IP ownership, and customer concentration"
+      ],
+      "sampleQuestions": [
+        "Give me your current risk assessment of this acquisition.",
+        "What are the biggest red flags in the financials?",
+        "Does the target actually own its core patents?",
+        "What has management told us that later turned out to be wrong?",
+        "How does the valuation look against comparable deals?"
+      ]
+    },
+    {
+      "id": "card-d-sales-engineer",
+      "card": "D",
+      "name": "Sales Engineer for Product X",
+      "shortName": "Sales Engineer",
+      "domain": "Vertex Financial opportunity",
+      "accent": "violet",
+      "persona": "An agent that supports a sales engineer pitching a specific technical product. It learns the customer's environment, the objections raised on each call, and our latest answer to each one.",
+      "systemPromptFocus": "the customer's stated technical requirements, every objection and its current status, the competitive position, and which differentiators are still live",
+      "testQuestion": "Tomorrow's call is the final pitch. What's our strategy?",
+      "docsDir": "synthetic-data/card-d-sales-engineer",
+      "round1Summary": "Vertex stack overview, objections log O1\u2013O5, approved pitch deck outline v3.",
+      "round2Summary": "Call 4 debrief with a new blocking objection, and a competitive update on Northwind v9.",
+      "successCriteria": [
+        "Does NOT repeat the v3 'lead with latency' plan",
+        "Anticipates O6 (control-plane callback / BaFin ORA) and opens with the v4.2 offline licence mode",
+        "Names the root cause as a stale topology doc, not a product gap",
+        "References Northwind v9: 54ms p99 and the new Sovereign deployment tier",
+        "Repositions on OpenShift support, Kafka-native ingestion and 7-year retention \u2014 the three things Sovereign cannot do",
+        "Re-sequences the deck so Security & Compliance leads (35% of RFP score vs 30% technical)",
+        "Notes Amara Nwosu's implementation-risk question as a buying signal"
+      ],
+      "contradictions": [
+        {
+          "topic": "Our primary differentiator",
+          "round1": "Latency. 47ms p99 vs Northwind's published 180ms. Lead the deck with it.",
+          "round2": "Northwind v9 benchmarks at 51\u201354ms. Stefan Vogt: 'four milliseconds better than the cheap option is not a reason.'",
+          "severity": "high"
+        },
+        {
+          "topic": "Deployment as a wedge",
+          "round1": "Northwind is SaaS-only and cannot meet the on-prem requirement at all.",
+          "round2": "Northwind shipped a customer-hosted Sovereign tier. The wedge is now OpenShift support, Kafka-native ingestion and 7-year retention \u2014 not on-prem per se.",
+          "severity": "high"
+        },
+        {
+          "topic": "Objection O2 status",
+          "round1": "Addressed \u2014 self-managed deployment, control plane air-gappable.",
+          "round2": "Reopened and blocking. The topology doc predates v4.2 and describes a 60-second outbound callback. InfoSec calls it a critical third-party dependency.",
+          "severity": "high"
+        },
+        {
+          "topic": "What wins the deal",
+          "round1": "Win slide 4 (latency) and you win Stefan; win Stefan and you win the deal.",
+          "round2": "RFP weights Security & Compliance at 35% vs Technical Fit at 30%. The path now runs through Ines Dubois as much as Stefan.",
+          "severity": "medium"
+        }
+      ],
+      "headline": "Your deal memory for the Vertex opportunity",
+      "clientSummary": "Remembers the customer\u2019s environment, every objection raised on every call, and where the competition has moved. Ask before a pitch and it will tell you which of your arguments still work \u2014 and which one stopped working last week.",
+      "knows": [
+        "The customer\u2019s stack and their stated requirements",
+        "Every objection, who raised it, and its current status",
+        "Where we stand against the competition, as of the latest update"
+      ],
+      "sampleQuestions": [
+        "Tomorrow\u2019s call is the final pitch. What is our strategy?",
+        "Which objections are still open, and what is our answer to each?",
+        "How do we compare to Northwind right now?",
+        "Which of our differentiators still hold up?",
+        "Who in the buying committee do we still need to win?"
+      ]
+    }
+  ]
+}

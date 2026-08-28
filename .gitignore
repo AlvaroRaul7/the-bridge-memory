@@ -11,8 +11,10 @@
 .memory_store_id_v2
 
 # Secrets
-.env
-.env.*
+# `.env*` (not `.env.*`) so variants like `.env_backend` and `.env-local` are
+# covered too — the dotted pattern alone missed them, and one such file was
+# holding live API keys.
+.env*
 !.env.example
 
 # Session output
@@ -26,3 +28,16 @@ venv/
 
 # Tests
 .pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+frontend/screenshots/
+frontend/test-results/
+frontend/playwright-report/
+
+# Per-scenario provisioning state
+.state/
+
+# macOS
+.DS_Store

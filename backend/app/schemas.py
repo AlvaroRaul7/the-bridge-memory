@@ -26,6 +26,16 @@ class SessionCreateRequest(BaseModel):
             "everyone sharing one (Tier-3 per-tenant memory)."
         ),
     )
+    module: str | None = Field(
+        default=None,
+        description=(
+            "Which module to open the session against. Each module has its "
+            "own agent, and its memory store is scoped to (customer, module) "
+            "so one customer's onboarding memory never reaches their "
+            "diligence session. Omitted falls back to the single-agent "
+            "configuration and a customer-wide store."
+        ),
+    )
     title: str | None = Field(
         default=None, description="Shown in the Console session list."
     )
@@ -55,7 +65,19 @@ class SessionResponse(BaseModel):
     title: str | None = None
     created_at: datetime | None = None
     memory_store_id: str
+    module: str | None = None
     usage: SessionUsage | None = None
+
+
+class ModuleInfo(BaseModel):
+    """A module the service can open a session against."""
+
+    id: str
+    name: str
+    domain: str
+    provisioned: bool = Field(
+        description="False when this module has no agent yet; /session will fail."
+    )
 
 
 # --- messages ---------------------------------------------------------------
@@ -102,7 +124,15 @@ class MessageResponse(BaseModel):
 class DocumentUpload(BaseModel):
     filename: str = Field(min_length=1)
     content: str = Field(min_length=1)
-    media_type: str = Field(default="text/markdown")
+    media_type: str = Field(
+        default="text/plain",
+        description=(
+            "Content-Type for the Files API upload. Markdown must go up as "
+            "text/plain: the API sniffs the bytes and rejects a text/markdown "
+            "upload with 'File content appears to be plain text, not "
+            "text/markdown', which surfaces here only as an upstream 422."
+        ),
+    )
 
 
 class AttachDocumentsRequest(BaseModel):

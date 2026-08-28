@@ -27,29 +27,59 @@ That's it. No infrastructure to spin up. Managed Agents handles the runtime.
 
 ## Pick a scenario card
 
-Four cards in [`scenario-cards.md`](./scenario-cards.md). Each is a persona that benefits from memory across sessions. Pick one.
+Four cards in [`scenario-cards.md`](./scenario-cards.md). Each is a persona that benefits from memory across sessions. **All four are built** — each has its own synthetic documents, its own persona prompt, its own test question and its own tracked contradictions.
+
+| Card | Persona | Domain | `--scenario` |
+| --- | --- | --- | --- |
+| A | New-Hire Onboarding Agent | BTS-Synthetic Engineering | `a` |
+| B | Customer Success Specialist | Acme Corp | `b` |
+| C | M&A Diligence Analyst | Project Lighthouse / Helios | `c` |
+| D | Sales Engineer for Product X | Vertex Financial | `d` |
+
+[`scenarios.json`](./scenarios.json) is the single source of truth for all four — the Python scripts and the UI both read it. Add a card there and both sides pick it up.
 
 ## Core build (25 min)
 
-1. **Create the agent.** Run `python create_agent.py`. This creates a Managed Agent with the Memory tool enabled, a system prompt tuned to your scenario, and saves the agent ID to `.agent_id`.
+Every script takes `--scenario` (a card letter or a full id). It defaults to Card A, so the original commands still work unchanged.
 
-2. **Run session 1.** Run `python run_session_1.py`. This:
-   - Uploads the docs from `synthetic-data/round1/` via the Files API
-   - Starts a session that asks the agent to read them and answer a baseline question
-   - Captures the answer in `outputs/session1.txt`
+1. **Create the agent.** `python create_agent.py --scenario b` creates a Managed Agent with a scenario-tuned system prompt, a cloud environment, and a memory store. IDs land in `.state/<scenario-id>/`. Use `--all` to provision all four cards at once.
 
-3. **Run session 2.** Run `python run_session_2.py`. This:
-   - Uploads `synthetic-data/round2/` (which contradicts or updates round 1)
-   - Starts a *new* session against the *same* agent
+2. **Run session 1.** `python run_session_1.py --scenario b`:
+   - Inlines the docs from `synthetic-data/<card>/round1/`
+   - Starts a session with the memory store attached at `/mnt/memory/`
+   - Writes `outputs/<scenario-id>/session1.txt` and `session1.json`
+
+3. **Run session 2.** `python run_session_2.py --scenario b`:
+   - Inlines `synthetic-data/<card>/round2/` (which contradicts round 1)
+   - Starts a *new* session against the *same* agent and memory store
    - Asks the same question
-   - Captures the answer in `outputs/session2.txt`
+   - Writes `session2.txt` and `session2.json`
 
-4. **Compare.** Open both outputs. The session 2 answer should:
-   - Acknowledge the conflict
-   - Reflect the newer information
-   - Reference what it learned in session 1 via its memory store
+4. **Compare.** Open the UI, or diff the two text files. The session 2 answer should acknowledge the conflict, reflect the newer information, and reference what it learned in session 1.
 
-By minute 30 you have two sessions to compare and a clear "the agent learned something" moment.
+`inspect_memory.py --scenario b [--full]` prints the memory store between runs.
+
+## The UI
+
+`frontend/` implements [`specs/03-frontend-react-shadcn.md`](./specs/03-frontend-react-shadcn.md)
+against the API in [`specs/02-backend-fastapi.md`](./specs/02-backend-fastapi.md).
+
+```bash
+cd frontend && npm install && npm run dev
+```
+
+Runs with no backend — msw serves all seven Spec 2 routes in the browser.
+Set `VITE_USE_MOCKS=false` in `frontend/.env.local` to point at the real
+FastAPI service; nothing else changes.
+
+- **Console tab** — the three Spec 3 views: a chat that shows which memories
+  `GET /memory/search` returned for each turn, a memory inspector with per-row
+  delete, and a session switcher.
+- **Scenarios tab** — demo scaffolding over the four cards: briefs, documents,
+  the round-1 vs round-2 contradiction table, a two-session replay and a
+  memory diff.
+
+See [`frontend/README.md`](./frontend/README.md).
 
 ## Stretch goals (20 min — pick at least one)
 
@@ -80,14 +110,22 @@ Read both out loud. Let the room see the agent's answer sharpen. Then open the m
 ```
 02-institutional-memory-agent/
 ├── README.md                      (you are here)
-├── scenario-cards.md
+├── scenario-cards.md              (the four personas)
+├── scenarios.json                 (registry — read by Python AND the UI)
+├── scenarios.py                   (registry loader for the Python side)
 ├── stretch-goals.md
 ├── requirements.txt
-├── create_agent.py                (creates the Managed Agent with Memory tool)
-├── run_session_1.py               (session 1 — uses round1 docs)
-├── run_session_2.py               (session 2 — adds round2 docs, asks same question)
+├── create_agent.py                (--scenario / --all)
+├── session_runner.py              (shared session logic for both rounds)
+├── run_session_1.py               (--scenario)
+├── run_session_2.py               (--scenario)
+├── inspect_memory.py              (--scenario --full)
 ├── stretch_memory_curator.py      (stretch: curator sub-agent)
+├── specs/                         (the four workstream specs)
+├── frontend/                      (Spec 3 — React + shadcn, msw-mocked)
 └── synthetic-data/
-    ├── round1/                    (initial context — onboarding handbook, policies, customer cases)
-    └── round2/                    (updates and contradictions)
+    ├── card-a-onboarding/         round1/ round2/
+    ├── card-b-customer-success/   round1/ round2/
+    ├── card-c-ma-diligence/       round1/ round2/
+    └── card-d-sales-engineer/     round1/ round2/
 ```

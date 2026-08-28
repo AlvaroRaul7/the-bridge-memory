@@ -36,6 +36,20 @@ DEFAULT_STORE_INSTRUCTIONS = (
     "Read it before answering. Record what you learn for future sessions."
 )
 
+
+def _store_instructions(extra: str | None) -> str:
+    """The memory protocol, plus any per-session guidance.
+
+    Appended, never substituted. `extra or DEFAULT` looked harmless but meant
+    a caller that passed *any* guidance — the UI passes which assistant this
+    is on every session — silently dropped the only text telling the agent to
+    read the store before answering and write to it afterwards. The store
+    stayed mounted and stayed empty, and the agent was right to say so.
+    """
+    if not extra:
+        return DEFAULT_STORE_INSTRUCTIONS
+    return f"{DEFAULT_STORE_INSTRUCTIONS}\n\n{extra}"
+
 # backend/app/agents.py -> backend/app -> backend -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -112,25 +126,40 @@ def _save_customer_store_registry(registry: dict[str, str]) -> None:
     CUSTOMER_STORE_REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
 
 
-def get_or_create_customer_store(client: Anthropic, customer_id: str) -> str:
-    """Get-or-create the memory store scoped to one customer.
+def get_or_create_customer_store(
+    client: Anthropic, customer_id: str, *, module: str | None = None
+) -> str:
+    """Get-or-create the memory store scoped to one customer, per module.
 
     Every session used to mount the single store in MEMORY_STORE_ID, shared
     by every caller regardless of who they were. This ties the store to
     customer_id instead — tagged in the store's own metadata, and cached in
     a local registry so the same customer always gets the same store back
     rather than a fresh one every session.
+
+    `module` is the second scoping axis. The same customer talking to the
+    onboarding assistant and to the diligence assistant should not share one
+    pile of notes: a restated EBITDA figure is not an answer to "how do I get
+    prod access". Omitting it keeps the customer-wide store, so a
+    single-agent deployment behaves exactly as before.
     """
+    key = f"{module}:{customer_id}" if module else customer_id
+
     registry = _load_customer_store_registry()
-    if customer_id in registry:
-        return registry[customer_id]
+    if key in registry:
+        return registry[key]
+
+    scope = f"customer {customer_id}" + (f" on module {module}" if module else "")
+    metadata = {"customer_id": customer_id}
+    if module:
+        metadata["module"] = module
 
     store = client.beta.memory_stores.create(
-        name=f"customer:{customer_id}",
-        description=f"Persistent memory for customer {customer_id}.",
-        metadata={"customer_id": customer_id},
+        name=f"customer:{key}",
+        description=f"Persistent memory for {scope}.",
+        metadata=metadata,
     )
-    registry[customer_id] = store.id
+    registry[key] = store.id
     _save_customer_store_registry(registry)
     return store.id
 
@@ -139,7 +168,7 @@ def get_or_create_customer_store(client: Anthropic, customer_id: str) -> str:
 
 
 def upload_document(
-    client: Anthropic, filename: str, content: str, media_type: str = "text/markdown"
+    client: Anthropic, filename: str, content: str, media_type: str = "text/plain"
 ) -> str:
     """Upload one document via the Files API and return its file id."""
     file = client.files.upload(file=(filename, content.encode("utf-8"), media_type))
@@ -186,7 +215,7 @@ def create_session(
                 "type": "memory_store",
                 "memory_store_id": memory_store_id,
                 "access": "read_write",
-                "instructions": instructions or DEFAULT_STORE_INSTRUCTIONS,
+                "instructions": _store_instructions(instructions),
             }
         ],
     )

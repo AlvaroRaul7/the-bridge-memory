@@ -74,6 +74,14 @@ def list_memories(
         ),
     ),
     customer_id: str | None = Query(default=None, description="Required when source=agent."),
+    module: str | None = Query(
+        default=None,
+        description=(
+            "Only used when source=agent, and it must match the module the "
+            "session was opened with — the store is scoped to (customer, "
+            "module), so omitting it reads a different, customer-wide store."
+        ),
+    ),
     tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
     path_prefix: str = Query(default="/", description="Only used when source=agent."),
     include_content: bool = Query(default=False, description="Only used when source=agent."),
@@ -93,7 +101,9 @@ def list_memories(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="customer_id is required when source=agent.",
             )
-        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
+        memory_store_id = agents.get_or_create_customer_store(
+            client, customer_id, module=module
+        )
         return agents.list_store_memories(
             client,
             memory_store_id=memory_store_id,
@@ -125,6 +135,9 @@ def delete_memory(
         ),
     ),
     customer_id: str | None = Query(default=None, description="Required when source=agent."),
+    module: str | None = Query(
+        default=None, description="Only used when source=agent. See GET /memory."
+    ),
     tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
     client: Anthropic = Depends(get_client),
 ) -> DeletedMemory:
@@ -134,7 +147,9 @@ def delete_memory(
                 status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail="customer_id is required when source=agent.",
             )
-        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
+        memory_store_id = agents.get_or_create_customer_store(
+            client, customer_id, module=module
+        )
         agents.delete_store_memory(client, memory_id, memory_store_id=memory_store_id)
         return DeletedMemory(id=memory_id)
 

@@ -153,14 +153,16 @@ do on its own.
 
 ### The sign-in backdrop
 
-`src/images/The Bridge.jpeg` is the source photo (4032px, 1.3 MB).
-`src/images/the-bridge.jpg` is the resized, recompressed copy the app actually
-imports (2400px, 409 KB) — a login screen should not block on a 1.3 MB image.
-Regenerate it after replacing the source:
+`src/images/the-bridge.jpg` (2400px, 409 KB) is what the app imports. It is a
+resized, recompressed copy of a 4032px original that is deliberately **not**
+kept in the repo — a login screen should not block on a 1.3 MB image, and the
+full-resolution source has no other use here.
+
+To swap the photo, drop a new one in and regenerate at the same size:
 
 ```bash
 sips -Z 2400 -s format jpeg -s formatOptions 68 \
-  "src/images/The Bridge.jpeg" --out src/images/the-bridge.jpg
+  <your-photo> --out src/images/the-bridge.jpg
 ```
 
 The photo is hazy and low-contrast, so the frame applies a small

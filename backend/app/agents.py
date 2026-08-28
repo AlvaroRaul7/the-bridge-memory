@@ -10,7 +10,10 @@ fix — see `ask()`.
 
 from __future__ import annotations
 
+import json
+import os
 import time
+from pathlib import Path
 from typing import Any, Iterable
 
 from anthropic import Anthropic
@@ -18,6 +21,8 @@ from anthropic import Anthropic
 from .schemas import (
     AgentMemoryListResponse,
     AgentMemoryRecord,
+    AttachDocumentsResponse,
+    DocumentUpload,
     MessageResponse,
     SessionResponse,
     SessionUsage,
@@ -30,6 +35,21 @@ DEFAULT_STORE_INSTRUCTIONS = (
     "This is your persistent institutional memory, mounted at /mnt/memory/. "
     "Read it before answering. Record what you learn for future sessions."
 )
+
+# backend/app/agents.py -> backend/app -> backend -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Overridable so tests don't write into the real repo — see conftest.py's
+# isolated_customer_store_registry fixture.
+CUSTOMER_STORE_REGISTRY_PATH = Path(
+    os.environ.get("CUSTOMER_STORE_REGISTRY_PATH")
+    or (_REPO_ROOT / ".customer_memory_stores.json")
+)
+
+# Files attached via attach_documents(), by session id. Process-local: a
+# second backend instance or a restart loses this — fine for a demo, not for
+# production (see backend/README.md).
+_SESSION_DOCUMENTS: dict[str, list[str]] = {}
 
 
 # --- mapping helpers --------------------------------------------------------
@@ -76,6 +96,71 @@ def _tool_use(event: Any) -> ToolUse:
         name=getattr(event, "name", "?"),
         target=target,
         touched_memory=MEMORY_MOUNT in (target or ""),
+    )
+
+
+# --- per-customer memory store (Tier-3 "tie memory to a customer_id") ------
+
+
+def _load_customer_store_registry() -> dict[str, str]:
+    if CUSTOMER_STORE_REGISTRY_PATH.exists():
+        return json.loads(CUSTOMER_STORE_REGISTRY_PATH.read_text())
+    return {}
+
+
+def _save_customer_store_registry(registry: dict[str, str]) -> None:
+    CUSTOMER_STORE_REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+
+
+def get_or_create_customer_store(client: Anthropic, customer_id: str) -> str:
+    """Get-or-create the memory store scoped to one customer.
+
+    Every session used to mount the single store in MEMORY_STORE_ID, shared
+    by every caller regardless of who they were. This ties the store to
+    customer_id instead — tagged in the store's own metadata, and cached in
+    a local registry so the same customer always gets the same store back
+    rather than a fresh one every session.
+    """
+    registry = _load_customer_store_registry()
+    if customer_id in registry:
+        return registry[customer_id]
+
+    store = client.beta.memory_stores.create(
+        name=f"customer:{customer_id}",
+        description=f"Persistent memory for customer {customer_id}.",
+        metadata={"customer_id": customer_id},
+    )
+    registry[customer_id] = store.id
+    _save_customer_store_registry(registry)
+    return store.id
+
+
+# --- documents (Files API, Tier-3 "growing document sets") -----------------
+
+
+def upload_document(
+    client: Anthropic, filename: str, content: str, media_type: str = "text/markdown"
+) -> str:
+    """Upload one document via the Files API and return its file id."""
+    file = client.files.upload(file=(filename, content.encode("utf-8"), media_type))
+    return file.id
+
+
+def attach_documents(
+    client: Anthropic, session_id: str, documents: list[DocumentUpload]
+) -> AttachDocumentsResponse:
+    """Upload a batch of documents and add them to this session's accumulated
+    set. Call this again with a new batch to grow it further — ask() attaches
+    the whole accumulated set to every subsequent message."""
+    new_ids = [
+        upload_document(client, doc.filename, doc.content, doc.media_type)
+        for doc in documents
+    ]
+    attached = _SESSION_DOCUMENTS.setdefault(session_id, [])
+    attached.extend(new_ids)
+
+    return AttachDocumentsResponse(
+        session_id=session_id, file_ids=list(attached), total_files=len(attached)
     )
 
 
@@ -142,10 +227,20 @@ def ask(
     stop_reason = "timeout"
     deadline = time.monotonic() + timeout_seconds
 
+    # Reference every document attached so far (see attach_documents()) as
+    # file-source document blocks, same shape the standard Messages API uses
+    # for a Files-API upload — ahead of the text block, growing with each
+    # attach_documents() call rather than re-inlining doc text every turn.
+    content: list[dict[str, Any]] = [
+        {"type": "document", "source": {"type": "file", "file_id": file_id}}
+        for file_id in _SESSION_DOCUMENTS.get(session_id, [])
+    ]
+    content.append({"type": "text", "text": text})
+
     with client.beta.sessions.events.stream(session_id) as stream:
         client.beta.sessions.events.send(
             session_id,
-            events=[{"type": "user.message", "content": [{"type": "text", "text": text}]}],
+            events=[{"type": "user.message", "content": content}],
         )
 
         for event in stream:

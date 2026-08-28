@@ -45,7 +45,6 @@ def _resource_id(env_var: str, id_file: str) -> str:
 class Settings:
     agent_id: str
     environment_id: str
-    memory_store_id: str
     backend_api_key: str
     cors_origins: tuple[str, ...]
     agent_timeout_seconds: float
@@ -69,7 +68,6 @@ class Settings:
         return cls(
             agent_id=_resource_id("AGENT_ID", ".agent_id"),
             environment_id=_resource_id("ENVIRONMENT_ID", ".environment_id"),
-            memory_store_id=_resource_id("MEMORY_STORE_ID", ".memory_store_id"),
             backend_api_key=backend_api_key,
             cors_origins=origins,
             agent_timeout_seconds=float(

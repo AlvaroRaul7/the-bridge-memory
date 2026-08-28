@@ -6,6 +6,7 @@ A thin HTTP layer over two separate memory tiers:
   Agent session with its native memory store mounted at `/mnt/memory/`.
   This service just relays messages; the agent itself decides what it
   writes there during a conversation.
+
 > **Two long-term stores, and `/memory` reads the agent's by default.**
 > The agent writes markdown into its own memory store during a session, using
 > ordinary file tools against `/mnt/memory/`. It has **no tool that can reach
@@ -40,33 +41,37 @@ OpenAPI docs at http://127.0.0.1:8000/docs.
 
 ## Environment
 
-| Variable                                                                       | Required | Default                 | Notes                                                                                                                         |
-| ------------------------------------------------------------------------------ | -------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `ANTHROPIC_API_KEY`                                                            | yes      | —                       | Read by the SDK. An `ant auth login` profile works too.                                                                       |
-| `BACKEND_API_KEY`                                                              | yes      | —                       | The `X-API-Key` callers must send. Startup fails without it, so the service is never accidentally open.                       |
-| `AGENT_ID`                                                                     | —        | `.agent_id`             | Falls back to the dotfile `create_agent.py` writes in the repo root.                                                          |
-| `ENVIRONMENT_ID`                                                               | —        | `.environment_id`       | Same.                                                                                                                         |
-| `MEMORY_STORE_ID`                                                              | —        | `.memory_store_id`      | Same.                                                                                                                         |
-| `CORS_ORIGINS`                                                                 | —        | `http://localhost:5173` | Comma-separated. Vite's dev origin by default.                                                                                |
-| `AGENT_TIMEOUT_SECONDS`                                                        | —        | `300`                   | Wall-clock ceiling on one agent turn.                                                                                         |
-| `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE`, `CHROMA_COLLECTION_NAME` | —        | see `../.env.example`   | Read by `memory_engine`, not by this service directly. Falls back to a local `PersistentClient` if `CHROMA_API_KEY` is unset. |
+| Variable                                                                       | Required | Default                        | Notes                                                                                                                                                            |
+| ------------------------------------------------------------------------------ | -------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ANTHROPIC_API_KEY`                                                            | yes      | —                              | Read by the SDK. An `ant auth login` profile works too.                                                                                                          |
+| `BACKEND_API_KEY`                                                              | yes      | —                              | The `X-API-Key` callers must send. Startup fails without it, so the service is never accidentally open.                                                          |
+| `AGENT_ID`                                                                     | —        | `.agent_id`                    | Falls back to the dotfile `create_agent.py` writes in the repo root.                                                                                             |
+| `ENVIRONMENT_ID`                                                               | —        | `.environment_id`              | Same.                                                                                                                                                            |
+| `CORS_ORIGINS`                                                                 | —        | `http://localhost:5173`        | Comma-separated. Vite's dev origin by default.                                                                                                                   |
+| `AGENT_TIMEOUT_SECONDS`                                                        | —        | `300`                          | Wall-clock ceiling on one agent turn.                                                                                                                            |
+| `CHROMA_API_KEY`, `CHROMA_TENANT`, `CHROMA_DATABASE`, `CHROMA_COLLECTION_NAME` | —        | see `../.env.example`          | Read by `memory_engine`, not by this service directly. Falls back to a local `PersistentClient` if `CHROMA_API_KEY` is unset.                                    |
+| `CUSTOMER_STORE_REGISTRY_PATH`                                                 | —        | `.customer_memory_stores.json` | Read by `agents.py`. Maps `customer_id` → native memory store id (see Tier-3 section below). Gitignored — it's local, mutable state, not a provisioned resource. |
+
+There is no more `MEMORY_STORE_ID` — every session now gets its own
+customer-scoped store instead of one shared one; see below.
 
 Because the resource IDs fall back to the dotfiles, a local checkout that has
-already run `create_agent.py` needs only the two keys.
+already run `create_agent.py` needs only `ANTHROPIC_API_KEY` and `BACKEND_API_KEY`.
 
 ## Endpoints
 
-| Method   | Path                    | Notes                                                                                             |
-| -------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
-| `POST`   | `/session`              | Creates a session with the native memory store mounted `read_write`.                              |
-| `POST`   | `/session/{id}/message` | Sends one message, returns the full reply.                                                        |
-| `GET`    | `/session/{id}`         | Status, title, token/cost usage.                                                                  |
-| `POST`   | `/memory`               | `{tenant_id, text, metadata}` — write a long-term memory.                                         |
-| `GET`    | `/memory/search`        | `?tenant_id=...&q=...&k=5` — semantic search.                                                     |
-| `GET`    | `/memory`               | `?source=agent` (default) lists the agent's own store; `?source=chroma&tenant_id=...` lists the vector tier. |
-| `DELETE` | `/memory/{id}`          | `?source=` is **required, no default**. `chroma` also needs `tenant_id` and 404s if it isn't that tenant's.  |
-| `POST`   | `/memory/curate`        | `{tenant_id}` — merge duplicates, flag contradictions, prune stale entries. See `app/curator.py`. |
-| `GET`    | `/healthz`              | No auth, no upstream call.                                                                        |
+| Method   | Path                      | Notes                                                                                                                                            |
+| -------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `POST`   | `/session`                | `{customer_id, title?, instructions?}` — get-or-creates that customer's own native store, mounts it `read_write`.                                |
+| `POST`   | `/session/{id}/message`   | Sends one message, returns the full reply. References every document attached via `/documents` so far.                                           |
+| `GET`    | `/session/{id}`           | `?customer_id=...` — status, title, token/cost usage.                                                                                            |
+| `POST`   | `/session/{id}/documents` | `{documents: [{filename, content, media_type?}]}` — uploads via the Files API, adds to this session's accumulated set. See Tier-3 section below. |
+| `POST`   | `/memory`                 | `{tenant_id, text, metadata}` — write a long-term memory.                                                                                        |
+| `GET`    | `/memory/search`          | `?tenant_id=...&q=...&k=5` — semantic search.                                                                                                    |
+| `GET`    | `/memory`                 | `?source=agent` (default) lists the agent's own store; `?source=chroma&tenant_id=...` lists the vector tier.                                     |
+| `DELETE` | `/memory/{id}`            | `?source=` is **required, no default**. `chroma` also needs `tenant_id` and 404s if it isn't that tenant's.                                      |
+| `POST`   | `/memory/curate`          | `{tenant_id}` — merge duplicates, flag contradictions, prune stale entries. See `app/curator.py`.                                                |
+| `GET`    | `/healthz`                | No auth, no upstream call.                                                                                                                       |
 
 All except `/healthz` require `X-API-Key`.
 
@@ -94,31 +99,58 @@ one real bug in the upstream scripts and it is easy to reintroduce.
 _your_ `X-API-Key` was wrong. If Anthropic rejects _our_ credentials that is a
 502, so nobody wastes time debugging the wrong key.
 
+## Tier-3: production-shaped memory
+
+Two stretch-goal pieces, both in `agents.py`:
+
+**Per-customer native memory (`get_or_create_customer_store`).** Every
+`/session` used to mount the one store in `MEMORY_STORE_ID`, shared by every
+caller. Now `POST /session` takes `customer_id` and get-or-creates a store
+tagged `metadata={"customer_id": ...}`, cached in a local
+`CUSTOMER_STORE_REGISTRY_PATH` JSON file (`customer_id` → store id) so the
+same customer gets the same store back on their next session. `GET
+/session/{id}` needs `customer_id` too, for the same reason `/memory` needs
+`tenant_id`: this service has no other way to know which store a given
+session's response should report.
+
+**Growing document sets (`attach_documents` / Files API).**
+`POST /session/{id}/documents` uploads documents via the Files API instead
+of inlining their text into the prompt (the old `run_session_1.py` pattern),
+and accumulates file ids per session in memory. Every subsequent
+`POST /session/{id}/message` attaches the whole accumulated set as
+`{"type": "document", "source": {"type": "file", "file_id": ...}}` content
+blocks ahead of the text — call `/documents` again with a new batch and the
+next message sees the union, not just the latest batch. Two caveats: the
+accumulated-set-per-session state is process-local (a restart or a second
+instance loses it — fine for a demo, not for production), and the document
+content-block shape mirrors the standard Messages API's file-reference
+block, which hasn't been confirmed against a live Managed Agents session
+(nothing else in this repo uses the Files API yet).
+
 ## Auth, and where it needs to go
 
 Today there is one shared key in `BACKEND_API_KEY`, checked with
 `secrets.compare_digest`. That is the workshop-grade minimum, and it has a
 specific limitation worth stating plainly: **the key authenticates the caller
-but does not authorize a tenant.** `tenant_id` on every `/memory` route is a
-plain caller-supplied query/body param — `memory_engine` guarantees a given
-`tenant_id` can't see past its own data, but nothing stops a caller holding
-the one shared `X-API-Key` from passing a different `tenant_id` than the one
-it should be scoped to.
+but does not authorize a tenant.** Both `tenant_id` on `/memory` and
+`customer_id` on `/session` are plain caller-supplied params — `memory_engine`
+and the customer-store registry each guarantee their id can't see past its
+own data, but nothing stops a caller holding the one shared `X-API-Key` from
+passing a different id than the one it should be scoped to.
 
 The upgrade path, when this needs to serve more than one real tenant:
 
-1. Replace the single key with a lookup — key → `tenant_id` — in a small
-   table or a secrets manager. `require_api_key` returns the caller's
-   `tenant_id` instead of `None`.
-2. Take `tenant_id` from that identity in every `/memory` route rather than
-   from the request, so a caller physically cannot address another tenant's
-   memories. Do not keep accepting a `tenant_id` query parameter once there's
-   a real identity to derive it from; that just moves the trust boundary to
-   the client.
-3. The `/session` side has a parallel, already-solved version of this: give
-   each user their own native memory store (max 8 mounted per session) plus
-   a shared read-only store for org-wide documents, so isolation follows from
-   how the session is created rather than from filtering code.
+1. Replace the single key with a lookup — key → `{tenant_id, customer_id}` —
+   in a small table or a secrets manager. `require_api_key` returns the
+   caller's identity instead of `None`.
+2. Take both ids from that identity rather than from the request, so a
+   caller physically cannot address another tenant's or customer's data. Do
+   not keep accepting them as parameters once there's a real identity to
+   derive them from; that just moves the trust boundary to the client.
+3. For `/session` specifically: mount a shared read-only store alongside the
+   customer's read-write one (max 8 mounted per session) for org-wide
+   documents, so a customer's session still sees company-wide policy without
+   being able to write to it.
 
 ## Tests
 
@@ -126,7 +158,7 @@ The upgrade path, when this needs to serve more than one real tenant:
 pytest tests -q
 ```
 
-31 tests, no network, no API key, no provisioned resources. `agents.py`'s
+50 tests, no network, no API key, no provisioned resources. `agents.py`'s
 Anthropic client is replaced by a fake covering the slice of `client.beta.*`
-it uses; `memory.py` and `curator.py` are tested by monkeypatching
+and `client.files.*` it uses; `memory.py` and `curator.py` are tested by monkeypatching
 `memory_engine` calls and the curator's judge call directly.

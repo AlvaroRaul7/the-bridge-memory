@@ -17,6 +17,15 @@ from pydantic import BaseModel, Field
 
 
 class SessionCreateRequest(BaseModel):
+    customer_id: str = Field(
+        min_length=1,
+        description=(
+            "Scopes this session's native memory store to one customer — "
+            "get-or-created and tagged with {customer_id: ...} in its "
+            "metadata, so each customer gets their own store rather than "
+            "everyone sharing one (Tier-3 per-tenant memory)."
+        ),
+    )
     title: str | None = Field(
         default=None, description="Shown in the Console session list."
     )
@@ -80,6 +89,32 @@ class MessageResponse(BaseModel):
         "timeout",
     ]
     tool_uses: list[ToolUse] = Field(default_factory=list)
+
+
+# --- documents (Files API, Tier-3 "growing document sets") -----------------
+#
+# Uploaded once via the Files API rather than inlined as text into every
+# message (see run_session_1.py's load_docs_as_context for the old
+# approach) — attach_documents() accumulates file ids per session, and
+# subsequent /message calls reference the whole accumulated set.
+
+
+class DocumentUpload(BaseModel):
+    filename: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    media_type: str = Field(default="text/markdown")
+
+
+class AttachDocumentsRequest(BaseModel):
+    documents: list[DocumentUpload] = Field(min_length=1)
+
+
+class AttachDocumentsResponse(BaseModel):
+    session_id: str
+    file_ids: list[str]
+    total_files: int = Field(
+        description="Cumulative count across every attach call for this session."
+    )
 
 
 # --- memory (ChromaDB-backed, via memory_engine) ----------------------------

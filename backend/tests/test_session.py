@@ -48,7 +48,9 @@ def test_create_session_passes_custom_instructions(client, fake):
         "/session",
         json={"customer_id": CUSTOMER_ID, "instructions": "Only read /notes/."},
     )
-    assert fake.created[0]["resources"][0]["instructions"] == "Only read /notes/."
+    # Contained, not equal: the memory protocol is prepended to it. Asserting
+    # equality here is what let the protocol get dropped in the first place.
+    assert "Only read /notes/." in fake.created[0]["resources"][0]["instructions"]
 
 
 def test_get_session_reports_usage(client):
@@ -159,7 +161,10 @@ def test_attach_documents_uploads_via_files_api(client, fake):
 
     [(file_id, uploaded)] = fake.uploaded_files
     assert file_id == body["file_ids"][0]
-    assert uploaded == ("policy.md", b"Be nice.", "text/markdown")
+    # text/plain, not text/markdown: the Files API sniffs the bytes and
+    # rejects markdown uploaded under a markdown type, which reaches the
+    # caller only as an opaque upstream 422.
+    assert uploaded == ("policy.md", b"Be nice.", "text/plain")
 
 
 def test_attach_documents_accumulates_across_calls(client, fake):
@@ -292,3 +297,19 @@ def test_an_unprovisioned_module_is_a_404_naming_the_fix(client, monkeypatch):
     )
     assert response.status_code == 404
     assert "provision.py" in response.json()["detail"]
+
+
+def test_per_session_instructions_never_drop_the_memory_protocol(client, fake):
+    """Regression: `instructions or DEFAULT` let any per-session guidance
+    replace the only text telling the agent to read and write /mnt/memory/.
+    The UI passes guidance on every session, so the protocol was always gone
+    and the store was always empty."""
+    client.post(
+        "/session",
+        json={"customer_id": CUSTOMER_ID, "instructions": "Only read /notes/."},
+    )
+    mounted = fake.created[0]["resources"][0]["instructions"]
+
+    assert "Only read /notes/." in mounted
+    assert "/mnt/memory/" in mounted
+    assert "Record what you learn" in mounted

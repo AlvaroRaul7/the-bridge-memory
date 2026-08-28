@@ -124,7 +124,15 @@ class MessageResponse(BaseModel):
 class DocumentUpload(BaseModel):
     filename: str = Field(min_length=1)
     content: str = Field(min_length=1)
-    media_type: str = Field(default="text/markdown")
+    media_type: str = Field(
+        default="text/plain",
+        description=(
+            "Content-Type for the Files API upload. Markdown must go up as "
+            "text/plain: the API sniffs the bytes and rejects a text/markdown "
+            "upload with 'File content appears to be plain text, not "
+            "text/markdown', which surfaces here only as an upstream 422."
+        ),
+    )
 
 
 class AttachDocumentsRequest(BaseModel):

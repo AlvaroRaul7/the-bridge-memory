@@ -36,6 +36,20 @@ DEFAULT_STORE_INSTRUCTIONS = (
     "Read it before answering. Record what you learn for future sessions."
 )
 
+
+def _store_instructions(extra: str | None) -> str:
+    """The memory protocol, plus any per-session guidance.
+
+    Appended, never substituted. `extra or DEFAULT` looked harmless but meant
+    a caller that passed *any* guidance — the UI passes which assistant this
+    is on every session — silently dropped the only text telling the agent to
+    read the store before answering and write to it afterwards. The store
+    stayed mounted and stayed empty, and the agent was right to say so.
+    """
+    if not extra:
+        return DEFAULT_STORE_INSTRUCTIONS
+    return f"{DEFAULT_STORE_INSTRUCTIONS}\n\n{extra}"
+
 # backend/app/agents.py -> backend/app -> backend -> repo root
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -154,7 +168,7 @@ def get_or_create_customer_store(
 
 
 def upload_document(
-    client: Anthropic, filename: str, content: str, media_type: str = "text/markdown"
+    client: Anthropic, filename: str, content: str, media_type: str = "text/plain"
 ) -> str:
     """Upload one document via the Files API and return its file id."""
     file = client.files.upload(file=(filename, content.encode("utf-8"), media_type))
@@ -201,7 +215,7 @@ def create_session(
                 "type": "memory_store",
                 "memory_store_id": memory_store_id,
                 "access": "read_write",
-                "instructions": instructions or DEFAULT_STORE_INSTRUCTIONS,
+                "instructions": _store_instructions(instructions),
             }
         ],
     )

@@ -78,8 +78,31 @@ export function ConsoleView({
     void loadMemories()
   }, [loadMemories])
 
+  /**
+   * Poll health rather than checking once on mount.
+   *
+   * A single check latches: restart the backend and the pill reads "Not
+   * connected" until someone reloads the page, long after the API is
+   * answering again. It also re-checks when the tab regains focus, so
+   * coming back to a laptop that slept shows the truth immediately.
+   */
   useEffect(() => {
-    api.health().then(() => setHealth('ok')).catch(() => setHealth('down'))
+    let cancelled = false
+    const check = () => {
+      api
+        .health()
+        .then(() => !cancelled && setHealth('ok'))
+        .catch(() => !cancelled && setHealth('down'))
+    }
+
+    check()
+    const timer = setInterval(check, 15_000)
+    window.addEventListener('focus', check)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+      window.removeEventListener('focus', check)
+    }
   }, [])
 
   // Mounted with key={account:scenario}, so a switch remounts and clears the

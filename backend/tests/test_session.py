@@ -2,7 +2,25 @@
 
 from __future__ import annotations
 
-from .conftest import CUSTOMER_ID, STORE_ID, agent_message, idle, terminated, tool_use
+import json
+
+from .conftest import (
+    CUSTOMER_ID,
+    STORE_ID,
+    agent_message,
+    content_delta,
+    idle,
+    terminated,
+    tool_use,
+)
+
+
+def parse_sse(body: str) -> list[dict]:
+    return [
+        json.loads(chunk.removeprefix("data: "))
+        for chunk in body.strip().split("\n\n")
+        if chunk
+    ]
 
 
 def test_create_session_mounts_the_memory_store(client, fake):
@@ -140,6 +158,98 @@ def test_deadline_reports_timeout_rather_than_a_clean_finish(
 
 def test_empty_message_is_rejected(client):
     assert client.post("/session/ses_1/message", json={"text": ""}).status_code == 422
+
+
+# --- streaming (SSE counterpart to /message) --------------------------------
+
+
+def test_stream_yields_deltas_as_they_arrive(client, fake):
+    fake.events = [
+        content_delta("evt_1", "Hello "),
+        content_delta("evt_1", "world."),
+        agent_message("Hello world.", event_id="evt_1"),
+        idle("end_turn"),
+    ]
+
+    body = client.post("/session/ses_1/message/stream", json={"text": "hi"}).text
+    chunks = parse_sse(body)
+
+    text_chunks = [c for c in chunks if c["type"] == "text"]
+    assert [c["text"] for c in text_chunks] == ["Hello ", "world."]
+
+    done = chunks[-1]
+    assert done == {"type": "done", "stop_reason": "end_turn", "tool_uses": []}
+
+
+def test_stream_does_not_duplicate_text_already_covered_by_deltas(client, fake):
+    """The buffered agent.message carries the *complete* content; only the
+    part not already streamed as a delta should be re-emitted."""
+    fake.events = [
+        content_delta("evt_1", "Hello world."),
+        agent_message("Hello world.", event_id="evt_1"),
+        idle("end_turn"),
+    ]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    text_chunks = [c for c in chunks if c["type"] == "text"]
+    assert [c["text"] for c in text_chunks] == ["Hello world."]
+
+
+def test_stream_fills_in_text_the_deltas_missed(client, fake):
+    """Deltas are best-effort and may stop early — the buffered event still
+    carries the full text, so any leftover suffix must still be yielded."""
+    fake.events = [
+        content_delta("evt_1", "Hello "),
+        agent_message("Hello world.", event_id="evt_1"),
+        idle("end_turn"),
+    ]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    text_chunks = [c for c in chunks if c["type"] == "text"]
+    assert [c["text"] for c in text_chunks] == ["Hello ", "world."]
+
+
+def test_stream_transient_idle_does_not_truncate_the_reply(client, fake):
+    """Same regression as test_transient_idle_does_not_truncate_the_reply,
+    for the streaming loop."""
+    fake.events = [
+        agent_message("Part one. ", event_id="evt_1"),
+        idle("requires_action"),
+        agent_message("Part two.", event_id="evt_2"),
+        idle("end_turn"),
+    ]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    text_chunks = [c for c in chunks if c["type"] == "text"]
+    assert [c["text"] for c in text_chunks] == ["Part one. ", "Part two."]
+    assert chunks[-1]["stop_reason"] == "end_turn"
+
+
+def test_stream_reports_tool_uses_in_the_done_event(client, fake):
+    fake.events = [
+        tool_use("bash", command="ls /mnt/memory/"),
+        agent_message("done", event_id="evt_1"),
+        idle("end_turn"),
+    ]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    done = chunks[-1]
+    assert done["tool_uses"] == [
+        {"name": "bash", "target": "ls /mnt/memory/", "touched_memory": True}
+    ]
+
+
+def test_stream_deadline_reports_timeout(client, fake, settings_with_timeout):
+    settings_with_timeout(0.0)
+    fake.events = [agent_message("started", event_id="evt_1"), idle("requires_action")]
+
+    chunks = parse_sse(client.post("/session/ses_1/message/stream", json={"text": "hi"}).text)
+
+    assert chunks[-1] == {"type": "done", "stop_reason": "timeout", "tool_uses": []}
 
 
 # --- documents (Files API, Tier-3 "growing document sets") -----------------

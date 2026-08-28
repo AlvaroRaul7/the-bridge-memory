@@ -35,15 +35,27 @@ NOW = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
 # --- event builders ---------------------------------------------------------
 
 
-def agent_message(text: str) -> SimpleNamespace:
+def agent_message(text: str, event_id: str = "evt") -> SimpleNamespace:
     return SimpleNamespace(
         type="agent.message",
+        id=event_id,
         content=[SimpleNamespace(type="text", text=text)],
     )
 
 
 def tool_use(name: str, **payload: Any) -> SimpleNamespace:
     return SimpleNamespace(type="agent.tool_use", name=name, input=payload)
+
+
+def content_delta(event_id: str, text: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="event_delta",
+        event_id=event_id,
+        delta=SimpleNamespace(
+            type="content_delta",
+            content=SimpleNamespace(type="text", text=text),
+        ),
+    )
 
 
 def idle(stop_reason: str = "end_turn") -> SimpleNamespace:

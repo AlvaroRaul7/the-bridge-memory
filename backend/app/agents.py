@@ -200,6 +200,22 @@ def get_session(
     return _session_response(session, memory_store_id)
 
 
+def _message_content(session_id: str, text: str) -> list[dict[str, Any]]:
+    """Build the content blocks for one outgoing user message.
+
+    References every document attached so far (see attach_documents()) as
+    file-source document blocks, same shape the standard Messages API uses
+    for a Files-API upload — ahead of the text block, growing with each
+    attach_documents() call rather than re-inlining doc text every turn.
+    """
+    content: list[dict[str, Any]] = [
+        {"type": "document", "source": {"type": "file", "file_id": file_id}}
+        for file_id in _SESSION_DOCUMENTS.get(session_id, [])
+    ]
+    content.append({"type": "text", "text": text})
+    return content
+
+
 def ask(
     client: Anthropic,
     session_id: str,
@@ -227,15 +243,7 @@ def ask(
     stop_reason = "timeout"
     deadline = time.monotonic() + timeout_seconds
 
-    # Reference every document attached so far (see attach_documents()) as
-    # file-source document blocks, same shape the standard Messages API uses
-    # for a Files-API upload — ahead of the text block, growing with each
-    # attach_documents() call rather than re-inlining doc text every turn.
-    content: list[dict[str, Any]] = [
-        {"type": "document", "source": {"type": "file", "file_id": file_id}}
-        for file_id in _SESSION_DOCUMENTS.get(session_id, [])
-    ]
-    content.append({"type": "text", "text": text})
+    content = _message_content(session_id, text)
 
     with client.beta.sessions.events.stream(session_id) as stream:
         client.beta.sessions.events.send(
@@ -277,6 +285,105 @@ def ask(
         stop_reason=stop_reason,
         tool_uses=tool_uses,
     )
+
+
+def ask_stream(
+    client: Anthropic,
+    session_id: str,
+    text: str,
+    *,
+    timeout_seconds: float = 300.0,
+) -> Iterable[dict[str, Any]]:
+    """SSE counterpart to ask() — same event loop and idle/requires_action
+    gate (see ask()'s docstring), yielding instead of accumulating.
+
+    Opts into `event_deltas=["agent.message"]`, which previews the reply as
+    `event_delta` fragments before the buffered `agent.message` event
+    arrives. Deltas are best-effort and may stop early, so on each buffered
+    `agent.message` we only yield whatever text wasn't already covered by
+    its deltas — this guarantees the full reply is always seen even if a
+    delta preview cuts out, without ever re-yielding the same text twice.
+
+    Yields dicts:
+      {"type": "text", "text": <fragment>}
+      {"type": "done", "stop_reason": ..., "tool_uses": [...]}
+      {"type": "error", "message": ...}
+    """
+    tool_uses: list[ToolUse] = []
+    stop_reason = "timeout"
+    deadline = time.monotonic() + timeout_seconds
+    streamed_for_event: dict[str, str] = {}
+
+    content = _message_content(session_id, text)
+
+    try:
+        with client.beta.sessions.events.stream(
+            session_id, event_deltas=["agent.message"]
+        ) as stream:
+            client.beta.sessions.events.send(
+                session_id,
+                events=[{"type": "user.message", "content": content}],
+            )
+
+            for event in stream:
+                event_type = getattr(event, "type", None)
+
+                if event_type == "event_delta":
+                    delta = getattr(event, "delta", None)
+                    if getattr(delta, "type", None) == "content_delta":
+                        block = getattr(delta, "content", None)
+                        if getattr(block, "type", None) == "text" and block.text:
+                            event_id = event.event_id
+                            streamed_for_event[event_id] = (
+                                streamed_for_event.get(event_id, "") + block.text
+                            )
+                            yield {"type": "text", "text": block.text}
+
+                elif event_type == "agent.message":
+                    full_text = "".join(
+                        block.text
+                        for block in getattr(event, "content", None) or []
+                        if getattr(block, "type", None) == "text"
+                    )
+                    already = streamed_for_event.pop(event.id, "")
+                    remainder = (
+                        full_text[len(already) :]
+                        if full_text.startswith(already)
+                        else full_text
+                    )
+                    if remainder:
+                        yield {"type": "text", "text": remainder}
+
+                elif event_type == "agent.tool_use":
+                    tool_uses.append(_tool_use(event))
+
+                elif event_type == "session.status_terminated":
+                    stop_reason = "terminated"
+                    break
+
+                elif event_type == "session.status_idle":
+                    reason = getattr(
+                        getattr(event, "stop_reason", None), "type", "end_turn"
+                    )
+                    if reason == "requires_action":
+                        # Waiting on us, not finished. Keep reading.
+                        if time.monotonic() > deadline:
+                            break
+                        continue
+                    stop_reason = reason
+                    break
+
+                if time.monotonic() > deadline:
+                    break
+    except Exception as exc:  # noqa: BLE001 - reported to the client, not swallowed
+        yield {"type": "error", "message": str(exc)}
+        return
+
+    yield {
+        "type": "done",
+        "stop_reason": stop_reason,
+        "tool_uses": [t.model_dump() for t in tool_uses],
+    }
 
 
 # --- the agent's own memory store (read/delete only) ------------------------

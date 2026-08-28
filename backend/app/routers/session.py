@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
+
 from anthropic import Anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import StreamingResponse
 
 from .. import agents
 from ..config import Settings
@@ -106,6 +109,33 @@ def send_message(
         body.text,
         timeout_seconds=settings.agent_timeout_seconds,
     )
+
+
+@router.post("/{session_id}/message/stream")
+def send_message_stream(
+    session_id: str,
+    body: MessageRequest,
+    client: Anthropic = Depends(get_client),
+    settings: Settings = Depends(get_settings),
+) -> StreamingResponse:
+    """SSE counterpart to POST /message: the same agent turn, sent as
+    `data: <json>\\n\\n` chunks as text arrives instead of blocking for the
+    whole reply. Each chunk is one of:
+      {"type": "text", "text": ...}
+      {"type": "done", "stop_reason": ..., "tool_uses": [...]}
+      {"type": "error", "message": ...}
+    """
+
+    def event_source():
+        for chunk in agents.ask_stream(
+            client,
+            session_id,
+            body.text,
+            timeout_seconds=settings.agent_timeout_seconds,
+        ):
+            yield f"data: {json.dumps(chunk)}\n\n"
+
+    return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
 @router.post(

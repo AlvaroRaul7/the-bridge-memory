@@ -5,6 +5,11 @@
 .curator_agent_id
 .deployment_id
 
+# Spec 4 (v2 agent) — platform resource IDs
+.agent_id_v2
+.environment_id_v2
+.memory_store_id_v2
+
 # Secrets
 .env
 .env.*

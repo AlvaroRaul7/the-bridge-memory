@@ -1,8 +1,22 @@
 # Spec 4 — Deployment on Anthropic Managed Agents
 
-**Owner:** TBD
+**Owner:** Esteban
 **Depends on:** Spec 1 + Spec 2 (needs a working backend to point the agent at)
 **Consumed by:** end-to-end demo
+
+> **Work plan:** [`04-deployment/`](./04-deployment/) — step-by-step tasks, each
+> with its own verification. Start at its [`README.md`](./04-deployment/README.md).
+> What needs deciding with the rest of the team is in
+> [`04-deployment/TEAM-NOTES.md`](./04-deployment/TEAM-NOTES.md).
+>
+> **Superseded in part by `5067e32`.** The backend that landed on `main` is a
+> proxy over Managed Agents using the native memory store, not a ChromaDB
+> service the agent calls — so the tool-based memory backend described below is
+> no longer what we are building. What survives is provisioning the agent, where
+> each piece runs, the secrets it needs, and the end-to-end proof. Both open
+> questions at the bottom are answered in the plan: the native memory store
+> stays, and the backend runs **outside** Managed Agents (the platform deploys
+> agents, not web apps).
 
 ## Context
 

@@ -1,0 +1,16 @@
+# Backend service dependencies.
+#
+# The root requirements.txt covers the demo scripts (create_agent.py,
+# run_session_*.py); this file covers the FastAPI service. anthropic is pinned
+# in both because both talk to Managed Agents.
+#
+# Note: anthropic 1.x is built on httpx2, while Starlette's TestClient needs
+# httpx. They are separate distributions and coexist fine.
+
+anthropic>=1.2.0
+fastapi>=0.141.0
+uvicorn[standard]>=0.52.0
+
+# tests
+pytest>=9.0
+httpx>=0.28

@@ -218,6 +218,22 @@ export const api = {
     ),
 
   /**
+   * DELETE /memory/{id}?source=agent — removes one file the agent wrote.
+   *
+   * `module` must match the session's, for the same reason listAgentMemory
+   * needs it: it selects the store.
+   */
+  deleteAgentMemory: (id: string, customerId: string, module?: string) =>
+    request<DeletedMemory>(
+      `/memory/${encodeURIComponent(id)}${qs({
+        source: 'agent',
+        customer_id: customerId,
+        module,
+      })}`,
+      { method: 'DELETE' },
+    ),
+
+  /**
    * DELETE /memory/{id}?source=chroma&tenant_id=
    *
    * `source` has no default server-side, deliberately: the two stores hold

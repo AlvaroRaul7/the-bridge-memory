@@ -29,6 +29,77 @@ import { scenarioAnswers } from '@/data/scenario-answers'
 import { scenarios } from '@/lib/scenarios'
 import { nextId, seedMemoriesFor } from './seed'
 
+
+/**
+ * Stand-in for what an agent has written to its own store. Keyed by module so
+ * switching assistants visibly switches what is remembered — the same property
+ * the real per-(customer, module) store gives you.
+ */
+const agentMemoryFiles: Record<string, { path: string; content: string }[]> = {
+  'card-a-onboarding': [
+    {
+      path: '/prod-access-policy.md',
+      content:
+        '# Production access\n\n' +
+        '- Read-only prod requires 2 weeks tenure plus a pairing session.\n' +
+        '- Request in #sre-access-requests, tagging your manager and the SRE on-call.\n' +
+        '- Provisioned via Okta, ~4 working hours after the pairing session.\n' +
+        '- Owner: Maya Singh (Head of Security).',
+    },
+    {
+      path: '/onboarding-handbook.md',
+      content:
+        '# Engineering org (Jan 2026)\n\n' +
+        '- Anika Reddy — Head of Engineering (London)\n' +
+        '- Carlos Mendes — Head of SRE, owns the on-call rotation\n' +
+        '- Yuki Tanaka — Head of Platform\n' +
+        '- Maya Singh — Head of Security',
+    },
+  ],
+  'card-b-customer-success': [
+    {
+      path: '/acme-corp.md',
+      content:
+        '# Acme Corp\n\n- ARR $840k, renewal 2026-09-30.\n' +
+        '- Sarah Chen, CTO — economic buyer.\n' +
+        '- Two open escalations on the ingest pipeline.',
+    },
+  ],
+  'card-c-ma-diligence': [
+    {
+      path: '/lighthouse-helios.md',
+      content:
+        '# Project Helios — Lighthouse\n\n- Reported EBITDA $7.8M (unaudited).\n' +
+        '- IP portfolio: 14 granted patents, 3 pending.\n' +
+        '- Key-person risk: CTO holds 4 of the core patents.',
+    },
+  ],
+  'card-d-sales-engineer': [
+    {
+      path: '/vertex-financial.md',
+      content:
+        '# Vertex Financial\n\n- Stack: Kafka, Snowflake, dbt.\n' +
+        '- Top objection: data residency in the EU.\n' +
+        '- Competing against Northwind.',
+    },
+  ],
+}
+
+/** Agent files removed via DELETE ?source=agent, by id. */
+const deletedAgentFiles = new Set<string>()
+
+function agentFilesFor(module: string | null) {
+  const files = (module && agentMemoryFiles[module]) || []
+  return files.map((file, index) => ({
+    id: `agentmem_${module}_${index}`,
+    path: file.path,
+    size_bytes: file.content.length,
+    created_at: new Date(Date.now() - 86_400_000).toISOString(),
+    updated_at: new Date(Date.now() - 3_600_000).toISOString(),
+    content: file.content,
+  })).filter((record) => !deletedAgentFiles.has(record.id))
+}
+
 const memories: MemoryRecord[] = []
 /** id → owning tenant. Chroma stores tenancy with the record; the mock mirrors it. */
 const tenantOf = new Map<string, string>()
@@ -259,12 +330,15 @@ export const handlers = [
           { status: 422 },
         )
       }
-      // Nothing writes to the agent's own store in mock mode: only a real
-      // agent turn does, with file tools against its mount.
+      // A real agent writes these itself with file tools against its mount.
+      // The mock stands in for a store that has already been seeded, because
+      // an empty panel here is indistinguishable from the bug where the UI
+      // read the wrong store entirely.
+      const module = params.get('module')
       return HttpResponse.json({
         source: 'agent',
-        memory_store_id: storeFor(customerId, params.get('module')),
-        memories: [],
+        memory_store_id: storeFor(customerId, module),
+        memories: agentFilesFor(module),
         prefixes: [],
       } satisfies AgentMemoryListResponse)
     }
@@ -308,6 +382,14 @@ export const handlers = [
     }
 
     const id = String(params.id)
+
+    if (source === 'agent') {
+      // A different store with different ids — falling through to the Chroma
+      // lookup below 404s on every agent file.
+      deletedAgentFiles.add(id)
+      return HttpResponse.json({ id, deleted: true } satisfies DeletedMemory)
+    }
+
     // The real router looks the record up within the tenant first, so ids from
     // another tenant 404 rather than deleting. Same here.
     const index = memories.findIndex((m) => m.id === id && tenantOf.get(m.id) === tenantId)

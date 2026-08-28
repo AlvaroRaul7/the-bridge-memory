@@ -10,7 +10,7 @@ import {
   rememberSession,
   type StoredSession,
 } from '@/lib/session-store'
-import type { MemoryRecord } from '@/lib/api-types'
+import type { AgentMemoryRecord, MemoryRecord } from '@/lib/api-types'
 import type { Scenario } from '@/lib/types'
 import { ChatView, type ChatTurn } from './chat-view'
 import { MemoryInspector } from './memory-inspector'
@@ -46,6 +46,15 @@ export function ConsoleView({
   const [creating, setCreating] = useState(false)
 
   const [memories, setMemories] = useState<MemoryRecord[]>([])
+  /**
+   * What the AGENT wrote to its own mounted store, as opposed to what a human
+   * saved to the Chroma tier. These are different systems: the agent cannot
+   * reach this service, so nothing it learns during a session ever lands in
+   * Chroma. Showing only Chroma answered "what does it remember?" with an
+   * empty panel while the agent was answering questions from a store full of
+   * notes — the two have to be shown side by side or the panel lies.
+   */
+  const [agentMemories, setAgentMemories] = useState<AgentMemoryRecord[]>([])
   const [memoriesLoading, setMemoriesLoading] = useState(true)
   const [deletingId, setDeletingId] = useState<string>()
 
@@ -64,14 +73,15 @@ export function ConsoleView({
         : String(err)
 
   const loadMemories = useCallback(async () => {
-    try {
-      setMemories(await api.listMemory(tenantId))
-    } catch {
-      setMemories([])
-    } finally {
-      setMemoriesLoading(false)
-    }
-  }, [tenantId])
+    // Independent tiers, so one failing must not blank the other.
+    const [chroma, agent] = await Promise.allSettled([
+      api.listMemory(tenantId),
+      api.listAgentMemory(userId, { module: scenario.id, includeContent: true }),
+    ])
+    setMemories(chroma.status === 'fulfilled' ? chroma.value : [])
+    setAgentMemories(agent.status === 'fulfilled' ? agent.value.memories : [])
+    setMemoriesLoading(false)
+  }, [scenario.id, tenantId, userId])
 
   const refreshMemories = useCallback(() => {
     setMemoriesLoading(true)
@@ -286,6 +296,19 @@ export function ConsoleView({
     [tenantId],
   )
 
+  const removeAgentMemory = useCallback(
+    async (id: string) => {
+      setDeletingId(id)
+      try {
+        await api.deleteAgentMemory(id, userId, scenario.id)
+        setAgentMemories((prev) => prev.filter((m) => m.id !== id))
+      } finally {
+        setDeletingId(undefined)
+      }
+    },
+    [scenario.id, userId],
+  )
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -305,6 +328,8 @@ export function ConsoleView({
           <HealthPill health={health} />
           <MemoryInspector
             memories={memories}
+            agentMemories={agentMemories}
+            onDeleteAgentMemory={removeAgentMemory}
             workspace={scenario.domain}
             loading={memoriesLoading}
             deletingId={deletingId}

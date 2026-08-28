@@ -143,3 +143,27 @@ test('a stored session the backend rejects is dropped, not retried forever', asy
   })
   expect(remaining ?? '').not.toContain('sess_deadbeef')
 })
+
+test('the inspector shows what the agent learned, not only what was saved', async ({
+  page,
+}) => {
+  // Regression: the panel read the Chroma tier only. The agent cannot reach
+  // that service, so everything it learns lives in its own store — the panel
+  // showed "nothing remembered" while the agent answered from a full one.
+  const agentReads: string[] = []
+  page.on('request', (request) => {
+    if (request.url().includes('source=agent')) agentReads.push(request.url())
+  })
+
+  await page.goto('/')
+  await page.getByRole('tab', { name: /ask/i }).click()
+  await page.getByRole('button', { name: /^Memory/ }).click()
+
+  const agentRows = page.getByRole('dialog').locator('article[data-tier="agent"]')
+  await expect(page.getByText('What the agent learned')).toBeVisible()
+  await expect(agentRows.filter({ hasText: '/prod-access-policy.md' })).toHaveCount(1)
+  await expect(agentRows.first()).toContainText('#sre-access-requests')
+
+  // It must actually ask the backend for that store, not infer it client-side.
+  expect(agentReads.length).toBeGreaterThan(0)
+})

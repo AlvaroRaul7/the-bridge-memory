@@ -79,3 +79,27 @@ test('each assistant opens a session against its own agent', async ({ page }) =>
   expect(created).toHaveLength(2)
   expect(new Set(created).size).toBe(2)
 })
+
+test('the inspector reads the agent store the session mounts', async ({ page }) => {
+  // Against the real backend the agent store is only non-empty if it has been
+  // seeded (backend/seed_memory.py). What is asserted here is the wiring: the
+  // panel must ASK for source=agent with the same module the session uses, or
+  // it is reading a different store than the one answering questions.
+  const agentReads: URL[] = []
+  page.on('request', (request) => {
+    const url = new URL(request.url())
+    if (url.searchParams.get('source') === 'agent') agentReads.push(url)
+  })
+
+  await page.goto('/')
+  await page.getByRole('tab', { name: /ask/i }).click()
+  await page.getByRole('button', { name: /^Memory/ }).click()
+  await expect(page.getByRole('dialog')).toBeVisible()
+
+  expect(agentReads.length).toBeGreaterThan(0)
+  const read = agentReads[0]
+  expect(read.searchParams.get('customer_id')).toBeTruthy()
+  // The module is what selects the store. Without it the backend resolves a
+  // customer-wide store that no session ever wrote to.
+  expect(read.searchParams.get('module')).toBeTruthy()
+})

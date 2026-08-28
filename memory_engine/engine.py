@@ -103,8 +103,33 @@ def list_memories(
     ]
 
 
+def get_memory(
+    tenant_id: str, record_id: str, *, collection: Collection | None = None
+) -> MemoryRecord | None:
+    """Fetch one memory by id, scoped to a tenant.
+
+    Returns None both when the id doesn't exist and when it belongs to a
+    different tenant — callers (e.g. a delete endpoint deciding whether to
+    404) shouldn't be able to distinguish "not found" from "not yours".
+    """
+    coll = collection or get_collection()
+    result = coll.get(ids=[record_id])
+    if not result["ids"]:
+        return None
+
+    metadata = result["metadatas"][0]
+    if metadata.get("tenant_id") != tenant_id:
+        return None
+
+    return MemoryRecord(id=result["ids"][0], text=result["documents"][0], metadata=metadata)
+
+
 def delete_memory(record_id: str, *, collection: Collection | None = None) -> None:
-    """Delete one memory by id."""
+    """Delete one memory by id.
+
+    Does not check tenant ownership — callers that need tenant-scoped
+    deletes should call get_memory() first (see backend's DELETE /memory/{id}).
+    """
     coll = collection or get_collection()
     coll.delete(ids=[record_id])
 

@@ -12,6 +12,7 @@ import pytest
 from memory_engine import (
     delete_by_filter,
     delete_memory,
+    get_memory,
     list_memories,
     query_memory,
     write_memory,
@@ -95,6 +96,26 @@ def test_delete_by_filter_only_affects_matching_tenant(collection):
 
     assert remaining_a == {"a2"}
     assert remaining_b == {"b1"}
+
+
+def test_get_memory_returns_record_for_owning_tenant(collection):
+    record_id = write_memory("tenant-a", "owned record", collection=collection)
+
+    record = get_memory("tenant-a", record_id, collection=collection)
+
+    assert record is not None
+    assert record.id == record_id
+    assert record.text == "owned record"
+
+
+def test_get_memory_returns_none_for_wrong_tenant(collection):
+    record_id = write_memory("tenant-a", "owned record", collection=collection)
+
+    assert get_memory("tenant-b", record_id, collection=collection) is None
+
+
+def test_get_memory_returns_none_for_missing_id(collection):
+    assert get_memory("tenant-a", "does-not-exist", collection=collection) is None
 
 
 def test_write_metadata_cannot_override_tenant_id(collection):

@@ -82,27 +82,37 @@ class MessageResponse(BaseModel):
     tool_uses: list[ToolUse] = Field(default_factory=list)
 
 
-# --- memory -----------------------------------------------------------------
+# --- memory (ChromaDB-backed, via memory_engine) ----------------------------
+#
+# These mirror memory_engine.schemas.MemoryRecord/MemoryHit 1:1 (see
+# specs/01-memory-engine-chromadb.md) rather than the Managed Agents native
+# memory store's file/path shape — this is a separate, tenant-scoped memory
+# system, not a proxy onto the agent's own /mnt/memory/.
+
+
+class MemoryWriteRequest(BaseModel):
+    tenant_id: str = Field(min_length=1)
+    text: str = Field(min_length=1)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryWriteResponse(BaseModel):
+    id: str
 
 
 class MemoryRecord(BaseModel):
     id: str
-    path: str
-    size_bytes: int | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
-    content: str | None = Field(
-        default=None, description="Only populated when include_content=true."
-    )
+    text: str
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class MemoryHit(MemoryRecord):
+    distance: float
 
 
 class MemoryListResponse(BaseModel):
-    memory_store_id: str
+    tenant_id: str
     memories: list[MemoryRecord]
-    prefixes: list[str] = Field(
-        default_factory=list,
-        description="Directory-like nodes returned when listing hierarchically.",
-    )
 
 
 class DeletedMemory(BaseModel):

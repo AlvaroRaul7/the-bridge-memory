@@ -34,6 +34,14 @@ def test_healthz_needs_no_key(anon):
     assert response.json() == {"status": "ok"}
 
 
-def test_no_upstream_call_happens_without_a_key(anon, fake):
-    anon.get("/memory")
-    assert fake.listed == []
+def test_no_memory_engine_call_happens_without_a_key(anon, monkeypatch):
+    import app.routers.memory as memory_router
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("memory_engine should not be reached without a valid X-API-Key")
+
+    monkeypatch.setattr(memory_router, "engine_list_memories", _boom)
+
+    response = anon.get("/memory", params={"tenant_id": "tenant-a"})
+
+    assert response.status_code == 401

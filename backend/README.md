@@ -48,16 +48,17 @@ already run `create_agent.py` needs only the two keys.
 
 ## Endpoints
 
-| Method   | Path                    | Notes                                                                   |
-| -------- | ----------------------- | ----------------------------------------------------------------------- |
-| `POST`   | `/session`              | Creates a session with the native memory store mounted `read_write`.    |
-| `POST`   | `/session/{id}/message` | Sends one message, returns the full reply.                              |
-| `GET`    | `/session/{id}`         | Status, title, token/cost usage.                                        |
-| `POST`   | `/memory`               | `{tenant_id, text, metadata}` — write a long-term memory.               |
-| `GET`    | `/memory/search`        | `?tenant_id=...&q=...&k=5` — semantic search.                           |
-| `GET`    | `/memory`               | `?tenant_id=...` — list, no ranking (for a memory-inspector panel).     |
-| `DELETE` | `/memory/{id}`          | `?tenant_id=...` — 404s if the id doesn't exist or isn't that tenant's. |
-| `GET`    | `/healthz`              | No auth, no upstream call.                                              |
+| Method   | Path                    | Notes                                                                                             |
+| -------- | ----------------------- | ------------------------------------------------------------------------------------------------- |
+| `POST`   | `/session`              | Creates a session with the native memory store mounted `read_write`.                              |
+| `POST`   | `/session/{id}/message` | Sends one message, returns the full reply.                                                        |
+| `GET`    | `/session/{id}`         | Status, title, token/cost usage.                                                                  |
+| `POST`   | `/memory`               | `{tenant_id, text, metadata}` — write a long-term memory.                                         |
+| `GET`    | `/memory/search`        | `?tenant_id=...&q=...&k=5` — semantic search.                                                     |
+| `GET`    | `/memory`               | `?tenant_id=...` — list, no ranking (for a memory-inspector panel).                               |
+| `DELETE` | `/memory/{id}`          | `?tenant_id=...` — 404s if the id doesn't exist or isn't that tenant's.                           |
+| `POST`   | `/memory/curate`        | `{tenant_id}` — merge duplicates, flag contradictions, prune stale entries. See `app/curator.py`. |
+| `GET`    | `/healthz`              | No auth, no upstream call.                                                                        |
 
 All except `/healthz` require `X-API-Key`.
 
@@ -117,6 +118,7 @@ The upgrade path, when this needs to serve more than one real tenant:
 pytest tests -q
 ```
 
-23 tests, no network, no API key, no provisioned resources — the Anthropic
-client is replaced by a fake covering the slice of `client.beta.*` that
-`agents.py` uses.
+31 tests, no network, no API key, no provisioned resources. `agents.py`'s
+Anthropic client is replaced by a fake covering the slice of `client.beta.*`
+it uses; `memory.py` and `curator.py` are tested by monkeypatching
+`memory_engine` calls and the curator's judge call directly.

@@ -13,6 +13,8 @@ extra filters but can never widen it past its own tenant.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from anthropic import Anthropic
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
@@ -24,9 +26,10 @@ from memory_engine import (
     write_memory,
 )
 
-from .. import curator
+from .. import agents, curator
 from ..deps import get_client, require_api_key
 from ..schemas import (
+    AgentMemoryListResponse,
     CurateRequest,
     CurationReport,
     DeletedMemory,
@@ -61,8 +64,49 @@ def search_memory(
     ]
 
 
-@router.get("", response_model=MemoryListResponse)
-def list_memories(tenant_id: str = Query(..., min_length=1)) -> MemoryListResponse:
+@router.get("", response_model=AgentMemoryListResponse | MemoryListResponse)
+def list_memories(
+    source: Literal["agent", "chroma"] = Query(
+        default="agent",
+        description=(
+            "Which store to read. 'agent' is the memory the agent actually "
+            "wrote during its sessions; 'chroma' is the vector tier."
+        ),
+    ),
+    customer_id: str | None = Query(default=None, description="Required when source=agent."),
+    tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
+    path_prefix: str = Query(default="/", description="Only used when source=agent."),
+    include_content: bool = Query(default=False, description="Only used when source=agent."),
+    client: Anthropic = Depends(get_client),
+) -> AgentMemoryListResponse | MemoryListResponse:
+    """List long-term memory.
+
+    Defaults to `source=agent`. That default matters: the agent writes markdown
+    into its own memory store during a session and has no tool that can reach
+    this service, so the Chroma tier stays empty unless something explicitly
+    populates it. A caller asking "what does the agent remember?" wants the
+    store, and defaulting to Chroma answered that question with an empty list.
+    """
+    if source == "agent":
+        if not customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="customer_id is required when source=agent.",
+            )
+        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
+        return agents.list_store_memories(
+            client,
+            memory_store_id=memory_store_id,
+            path_prefix=path_prefix,
+            include_content=include_content,
+        )
+
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="tenant_id is required when source=chroma.",
+        )
+
     records = engine_list_memories(tenant_id)
     return MemoryListResponse(
         tenant_id=tenant_id,
@@ -72,8 +116,34 @@ def list_memories(tenant_id: str = Query(..., min_length=1)) -> MemoryListRespon
 
 @router.delete("/{memory_id}", response_model=DeletedMemory)
 def delete_memory(
-    memory_id: str, tenant_id: str = Query(..., min_length=1)
+    memory_id: str,
+    source: Literal["agent", "chroma"] = Query(
+        ...,
+        description=(
+            "Required, with no default: the two stores hold different things "
+            "and a wrong guess destroys data."
+        ),
+    ),
+    customer_id: str | None = Query(default=None, description="Required when source=agent."),
+    tenant_id: str | None = Query(default=None, description="Required when source=chroma."),
+    client: Anthropic = Depends(get_client),
 ) -> DeletedMemory:
+    if source == "agent":
+        if not customer_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="customer_id is required when source=agent.",
+            )
+        memory_store_id = agents.get_or_create_customer_store(client, customer_id)
+        agents.delete_store_memory(client, memory_id, memory_store_id=memory_store_id)
+        return DeletedMemory(id=memory_id)
+
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail="tenant_id is required when source=chroma.",
+        )
+
     # get_memory() first so a caller can't delete another tenant's memory by
     # guessing/enumerating ids — a bare `delete(ids=[memory_id])` in Chroma
     # doesn't check ownership.

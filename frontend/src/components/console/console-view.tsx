@@ -97,7 +97,7 @@ export function ConsoleView({
     // Confirm the backend still has it; sessions get terminated, and an id
     // left over from a different API mode will be rejected outright.
     api
-      .getSession(recent.sessionId)
+      .getSession(recent.sessionId, userId, scenario.id)
       .then(() => setActiveSessionId(recent.sessionId))
       .catch(() => {
         // Drop it. Without this the same dead id is re-fetched on every load,
@@ -121,8 +121,11 @@ export function ConsoleView({
     try {
       const title = `${scenario.shortName} · ${new Date().toLocaleDateString()}`
       const created = await api.createSession({
-        // Each assistant has its own agent and memory store server-side; this
-        // is what makes the picker mean something.
+        // The two scoping axes the backend mounts a store from: who is asking,
+        // and which assistant they are asking. Same customer, different
+        // assistant, different memory — which is what makes the picker mean
+        // something.
+        customer_id: userId,
         module: scenario.id,
         title,
         // The backend has no scenario concept, so which assistant this is

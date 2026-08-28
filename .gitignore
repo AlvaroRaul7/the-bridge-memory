@@ -4,6 +4,7 @@
 .memory_store_id
 .curator_agent_id
 .deployment_id
+.customer_memory_stores.json
 
 # Spec 4 (v2 agent) — platform resource IDs
 .agent_id_v2
@@ -16,6 +17,12 @@
 # holding live API keys.
 .env*
 !.env.example
+
+# Local Chroma fallback store (memory_engine uses Chroma Cloud when
+# CHROMA_API_KEY is set, and a PersistentClient under CHROMA_LOCAL_PATH
+# otherwise — which defaults to ".chroma" relative to the working directory)
+.chroma/
+**/.chroma/
 
 # Session output
 outputs/

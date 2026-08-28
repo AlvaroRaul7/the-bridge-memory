@@ -17,12 +17,23 @@ from pydantic import BaseModel, Field
 
 
 class SessionCreateRequest(BaseModel):
+    customer_id: str = Field(
+        min_length=1,
+        description=(
+            "Scopes this session's native memory store to one customer — "
+            "get-or-created and tagged with {customer_id: ...} in its "
+            "metadata, so each customer gets their own store rather than "
+            "everyone sharing one (Tier-3 per-tenant memory)."
+        ),
+    )
     module: str | None = Field(
         default=None,
         description=(
-            "Which module to open the session against. Each module has its own "
-            "agent and its own memory store. Omitted falls back to the "
-            "single-agent configuration."
+            "Which module to open the session against. Each module has its "
+            "own agent, and its memory store is scoped to (customer, module) "
+            "so one customer's onboarding memory never reaches their "
+            "diligence session. Omitted falls back to the single-agent "
+            "configuration and a customer-wide store."
         ),
     )
     title: str | None = Field(
@@ -102,6 +113,32 @@ class MessageResponse(BaseModel):
     tool_uses: list[ToolUse] = Field(default_factory=list)
 
 
+# --- documents (Files API, Tier-3 "growing document sets") -----------------
+#
+# Uploaded once via the Files API rather than inlined as text into every
+# message (see run_session_1.py's load_docs_as_context for the old
+# approach) — attach_documents() accumulates file ids per session, and
+# subsequent /message calls reference the whole accumulated set.
+
+
+class DocumentUpload(BaseModel):
+    filename: str = Field(min_length=1)
+    content: str = Field(min_length=1)
+    media_type: str = Field(default="text/markdown")
+
+
+class AttachDocumentsRequest(BaseModel):
+    documents: list[DocumentUpload] = Field(min_length=1)
+
+
+class AttachDocumentsResponse(BaseModel):
+    session_id: str
+    file_ids: list[str]
+    total_files: int = Field(
+        description="Cumulative count across every attach call for this session."
+    )
+
+
 # --- memory (ChromaDB-backed, via memory_engine) ----------------------------
 #
 # These mirror memory_engine.schemas.MemoryRecord/MemoryHit 1:1 (see
@@ -131,8 +168,38 @@ class MemoryHit(MemoryRecord):
 
 
 class MemoryListResponse(BaseModel):
+    source: Literal["chroma"] = "chroma"
     tenant_id: str
     memories: list[MemoryRecord]
+
+
+# --- the agent's own memory store -------------------------------------------
+#
+# Distinct from the Chroma tier above and deliberately not squeezed into the
+# same shape. A Chroma memory is a chunk of text with an embedding; an agent
+# memory is a *file with a path* that the agent wrote itself with ordinary file
+# tools. Collapsing them would hide which store a caller is looking at.
+
+
+class AgentMemoryRecord(BaseModel):
+    id: str
+    path: str
+    size_bytes: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    content: str | None = Field(
+        default=None, description="Only populated when include_content=true."
+    )
+
+
+class AgentMemoryListResponse(BaseModel):
+    source: Literal["agent"] = "agent"
+    memory_store_id: str
+    memories: list[AgentMemoryRecord]
+    prefixes: list[str] = Field(
+        default_factory=list,
+        description="Directory-like nodes returned when listing hierarchically.",
+    )
 
 
 class DeletedMemory(BaseModel):

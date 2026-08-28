@@ -12,6 +12,7 @@
 
 import { HttpResponse, http } from 'msw'
 import type {
+  AgentMemoryListResponse,
   CurationReport,
   DeletedMemory,
   MemoryHit,
@@ -36,6 +37,22 @@ const sessions = new Map<string, SessionResponse>()
 const sessionScenario = new Map<string, string>()
 /** How many turns a session has taken, so the second one can differ. */
 const sessionTurns = new Map<string, number>()
+
+/**
+ * The backend's get-or-create registry, in miniature: one memory store per
+ * (customer, module), stable across calls. Same customer on a different
+ * assistant gets a different store — that separation is the thing worth
+ * mocking, and a fixed 'memstore_mock' hid it.
+ */
+const customerStores = new Map<string, string>()
+function storeFor(customerId: string, module?: string | null): string {
+  const key = module ? `${module}:${customerId}` : customerId
+  const existing = customerStores.get(key)
+  if (existing) return existing
+  const id = `memstore_${Math.random().toString(36).slice(2, 10)}`
+  customerStores.set(key, id)
+  return id
+}
 
 const seeded = new Set<string>()
 function ensureSeeded(tenant: string) {
@@ -76,13 +93,23 @@ export const handlers = [
     if (denied) return denied
 
     const body = ((await request.json()) ?? {}) as SessionCreateRequest
+    if (!body.customer_id) {
+      return HttpResponse.json(
+        { detail: 'customer_id is required.' },
+        { status: 422 },
+      )
+    }
+
     const id = `sess_${Math.random().toString(36).slice(2, 10)}`
     const session: SessionResponse = {
       id,
       status: 'idle',
       title: body.title ?? null,
       created_at: new Date().toISOString(),
-      memory_store_id: 'memstore_mock',
+      // The backend get-or-creates one store per (customer, module). Mirror
+      // that here, or the mock hides the isolation the real API provides.
+      memory_store_id: storeFor(body.customer_id, body.module),
+      module: body.module ?? null,
       usage: { input_tokens: 0, output_tokens: 0 },
     }
     sessions.set(id, session)
@@ -99,6 +126,13 @@ export const handlers = [
   http.get(url('/session/:id'), ({ request, params }) => {
     const denied = unauthorized(request)
     if (denied) return denied
+
+    if (!new URL(request.url).searchParams.get('customer_id')) {
+      return HttpResponse.json(
+        { detail: 'customer_id is required.' },
+        { status: 422 },
+      )
+    }
 
     const session = sessions.get(String(params.id))
     if (!session) {
@@ -212,13 +246,40 @@ export const handlers = [
     const denied = unauthorized(request)
     if (denied) return denied
 
-    const tenantId = new URL(request.url).searchParams.get('tenant_id')
+    const params = new URL(request.url).searchParams
+    // Defaults to `agent`, same as the backend — a caller that forgets
+    // `source` must get the agent shape here too, not a silent Chroma list.
+    const source = params.get('source') ?? 'agent'
+
+    if (source === 'agent') {
+      const customerId = params.get('customer_id')
+      if (!customerId) {
+        return HttpResponse.json(
+          { detail: 'customer_id is required when source=agent.' },
+          { status: 422 },
+        )
+      }
+      // Nothing writes to the agent's own store in mock mode: only a real
+      // agent turn does, with file tools against its mount.
+      return HttpResponse.json({
+        source: 'agent',
+        memory_store_id: storeFor(customerId),
+        memories: [],
+        prefixes: [],
+      } satisfies AgentMemoryListResponse)
+    }
+
+    const tenantId = params.get('tenant_id')
     if (!tenantId) {
-      return HttpResponse.json({ detail: 'tenant_id is required' }, { status: 422 })
+      return HttpResponse.json(
+        { detail: 'tenant_id is required when source=chroma.' },
+        { status: 422 },
+      )
     }
     ensureSeeded(tenantId)
 
     return HttpResponse.json({
+      source: 'chroma',
       tenant_id: tenantId,
       memories: forTenant(tenantId),
     } satisfies MemoryListResponse)
@@ -228,9 +289,22 @@ export const handlers = [
     const denied = unauthorized(request)
     if (denied) return denied
 
-    const tenantId = new URL(request.url).searchParams.get('tenant_id')
-    if (!tenantId) {
-      return HttpResponse.json({ detail: 'tenant_id is required' }, { status: 422 })
+    const query = new URL(request.url).searchParams
+    // Required with no default server-side: the two stores hold different
+    // things and a wrong guess destroys data.
+    const source = query.get('source')
+    if (source !== 'chroma' && source !== 'agent') {
+      return HttpResponse.json(
+        { detail: 'source is required and must be "agent" or "chroma".' },
+        { status: 422 },
+      )
+    }
+    const tenantId = query.get('tenant_id')
+    if (source === 'chroma' && !tenantId) {
+      return HttpResponse.json(
+        { detail: 'tenant_id is required when source=chroma.' },
+        { status: 422 },
+      )
     }
 
     const id = String(params.id)

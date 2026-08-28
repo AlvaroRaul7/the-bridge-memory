@@ -10,12 +10,24 @@ fix — see `ask()`.
 
 from __future__ import annotations
 
+import json
+import os
 import time
-from typing import Any
+from pathlib import Path
+from typing import Any, Iterable
 
 from anthropic import Anthropic
 
-from .schemas import MessageResponse, SessionResponse, SessionUsage, ToolUse
+from .schemas import (
+    AgentMemoryListResponse,
+    AgentMemoryRecord,
+    AttachDocumentsResponse,
+    DocumentUpload,
+    MessageResponse,
+    SessionResponse,
+    SessionUsage,
+    ToolUse,
+)
 
 MEMORY_MOUNT = "/mnt/memory"
 
@@ -23,6 +35,21 @@ DEFAULT_STORE_INSTRUCTIONS = (
     "This is your persistent institutional memory, mounted at /mnt/memory/. "
     "Read it before answering. Record what you learn for future sessions."
 )
+
+# backend/app/agents.py -> backend/app -> backend -> repo root
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# Overridable so tests don't write into the real repo — see conftest.py's
+# isolated_customer_store_registry fixture.
+CUSTOMER_STORE_REGISTRY_PATH = Path(
+    os.environ.get("CUSTOMER_STORE_REGISTRY_PATH")
+    or (_REPO_ROOT / ".customer_memory_stores.json")
+)
+
+# Files attached via attach_documents(), by session id. Process-local: a
+# second backend instance or a restart loses this — fine for a demo, not for
+# production (see backend/README.md).
+_SESSION_DOCUMENTS: dict[str, list[str]] = {}
 
 
 # --- mapping helpers --------------------------------------------------------
@@ -69,6 +96,86 @@ def _tool_use(event: Any) -> ToolUse:
         name=getattr(event, "name", "?"),
         target=target,
         touched_memory=MEMORY_MOUNT in (target or ""),
+    )
+
+
+# --- per-customer memory store (Tier-3 "tie memory to a customer_id") ------
+
+
+def _load_customer_store_registry() -> dict[str, str]:
+    if CUSTOMER_STORE_REGISTRY_PATH.exists():
+        return json.loads(CUSTOMER_STORE_REGISTRY_PATH.read_text())
+    return {}
+
+
+def _save_customer_store_registry(registry: dict[str, str]) -> None:
+    CUSTOMER_STORE_REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+
+
+def get_or_create_customer_store(
+    client: Anthropic, customer_id: str, *, module: str | None = None
+) -> str:
+    """Get-or-create the memory store scoped to one customer, per module.
+
+    Every session used to mount the single store in MEMORY_STORE_ID, shared
+    by every caller regardless of who they were. This ties the store to
+    customer_id instead — tagged in the store's own metadata, and cached in
+    a local registry so the same customer always gets the same store back
+    rather than a fresh one every session.
+
+    `module` is the second scoping axis. The same customer talking to the
+    onboarding assistant and to the diligence assistant should not share one
+    pile of notes: a restated EBITDA figure is not an answer to "how do I get
+    prod access". Omitting it keeps the customer-wide store, so a
+    single-agent deployment behaves exactly as before.
+    """
+    key = f"{module}:{customer_id}" if module else customer_id
+
+    registry = _load_customer_store_registry()
+    if key in registry:
+        return registry[key]
+
+    scope = f"customer {customer_id}" + (f" on module {module}" if module else "")
+    metadata = {"customer_id": customer_id}
+    if module:
+        metadata["module"] = module
+
+    store = client.beta.memory_stores.create(
+        name=f"customer:{key}",
+        description=f"Persistent memory for {scope}.",
+        metadata=metadata,
+    )
+    registry[key] = store.id
+    _save_customer_store_registry(registry)
+    return store.id
+
+
+# --- documents (Files API, Tier-3 "growing document sets") -----------------
+
+
+def upload_document(
+    client: Anthropic, filename: str, content: str, media_type: str = "text/markdown"
+) -> str:
+    """Upload one document via the Files API and return its file id."""
+    file = client.files.upload(file=(filename, content.encode("utf-8"), media_type))
+    return file.id
+
+
+def attach_documents(
+    client: Anthropic, session_id: str, documents: list[DocumentUpload]
+) -> AttachDocumentsResponse:
+    """Upload a batch of documents and add them to this session's accumulated
+    set. Call this again with a new batch to grow it further — ask() attaches
+    the whole accumulated set to every subsequent message."""
+    new_ids = [
+        upload_document(client, doc.filename, doc.content, doc.media_type)
+        for doc in documents
+    ]
+    attached = _SESSION_DOCUMENTS.setdefault(session_id, [])
+    attached.extend(new_ids)
+
+    return AttachDocumentsResponse(
+        session_id=session_id, file_ids=list(attached), total_files=len(attached)
     )
 
 
@@ -135,10 +242,20 @@ def ask(
     stop_reason = "timeout"
     deadline = time.monotonic() + timeout_seconds
 
+    # Reference every document attached so far (see attach_documents()) as
+    # file-source document blocks, same shape the standard Messages API uses
+    # for a Files-API upload — ahead of the text block, growing with each
+    # attach_documents() call rather than re-inlining doc text every turn.
+    content: list[dict[str, Any]] = [
+        {"type": "document", "source": {"type": "file", "file_id": file_id}}
+        for file_id in _SESSION_DOCUMENTS.get(session_id, [])
+    ]
+    content.append({"type": "text", "text": text})
+
     with client.beta.sessions.events.stream(session_id) as stream:
         client.beta.sessions.events.send(
             session_id,
-            events=[{"type": "user.message", "content": [{"type": "text", "text": text}]}],
+            events=[{"type": "user.message", "content": content}],
         )
 
         for event in stream:
@@ -176,3 +293,69 @@ def ask(
         tool_uses=tool_uses,
     )
 
+
+# --- the agent's own memory store (read/delete only) ------------------------
+#
+# We never write here. The agent does that itself during a session, with
+# ordinary file tools against its /mnt/memory/ mount. These functions exist so
+# a UI can show what it chose to keep — which is the whole demo.
+
+
+def list_store_memories(
+    client: Anthropic,
+    *,
+    memory_store_id: str,
+    path_prefix: str = "/",
+    include_content: bool = False,
+) -> AgentMemoryListResponse:
+    """List the files the agent has written to its memory store.
+
+    Sorted client-side: the list endpoint no longer honours `order_by` (see the
+    note in inspect_memory.py), and a stable order matters for a UI panel.
+    """
+    page = client.beta.memory_stores.memories.list(
+        memory_store_id,
+        path_prefix=path_prefix,
+        view="full" if include_content else "basic",
+    )
+
+    memories: list[AgentMemoryRecord] = []
+    prefixes: list[str] = []
+
+    for item in _iter_page(page):
+        if getattr(item, "type", None) == "memory_prefix":
+            prefixes.append(item.path)
+            continue
+
+        memories.append(
+            AgentMemoryRecord(
+                id=item.id,
+                path=item.path,
+                size_bytes=getattr(item, "content_size_bytes", None),
+                created_at=getattr(item, "created_at", None),
+                updated_at=getattr(item, "updated_at", None),
+                content=getattr(item, "content", None) if include_content else None,
+            )
+        )
+
+    memories.sort(key=lambda m: m.path)
+    prefixes.sort()
+
+    return AgentMemoryListResponse(
+        memory_store_id=memory_store_id, memories=memories, prefixes=prefixes
+    )
+
+
+def delete_store_memory(
+    client: Anthropic, memory_id: str, *, memory_store_id: str
+) -> str:
+    client.beta.memory_stores.memories.delete(
+        memory_id, memory_store_id=memory_store_id
+    )
+    return memory_id
+
+
+def _iter_page(page: Any) -> Iterable[Any]:
+    """Iterate a cursor page without assuming it auto-paginates."""
+    data = getattr(page, "data", None)
+    return data if data is not None else page

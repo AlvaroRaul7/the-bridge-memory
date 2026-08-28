@@ -17,6 +17,7 @@
 
 import { getAuthToken } from './auth'
 import type {
+  AgentMemoryListResponse,
   CurationReport,
   DeletedMemory,
   Health,
@@ -136,15 +137,23 @@ export const api = {
    */
 
   /** POST /session */
-  createSession: (body: SessionCreateRequest = {}) =>
+  createSession: (body: SessionCreateRequest) =>
     request<SessionResponse>('/session', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  /** GET /session/{id} */
-  getSession: (id: string) =>
-    request<SessionResponse>(`/session/${encodeURIComponent(id)}`),
+  /**
+   * GET /session/{id}
+   *
+   * customer_id and module are not decoration: the backend re-derives the
+   * mounted memory store from them, so they have to match what POST /session
+   * was given or a different store comes back.
+   */
+  getSession: (id: string, customerId: string, module?: string) =>
+    request<SessionResponse>(
+      `/session/${encodeURIComponent(id)}${qs({ customer_id: customerId, module })}`,
+    ),
 
   /**
    * POST /session/{id}/message
@@ -174,16 +183,42 @@ export const api = {
       `/memory/search${qs({ tenant_id: params.tenant_id, q: params.q, k: params.k ?? 5 })}`,
     ),
 
-  /** GET /memory?tenant_id= — unwrapped to the array callers actually want. */
+  /**
+   * GET /memory?source=chroma&tenant_id= — unwrapped to the array callers want.
+   *
+   * `source` is passed explicitly rather than relying on the default, which is
+   * `agent` and returns a different shape (AgentMemoryRecord: a file with a
+   * path, not a chunk with an embedding).
+   */
   listMemory: async (tenantId: string): Promise<MemoryRecord[]> => {
-    const res = await request<MemoryListResponse>(`/memory${qs({ tenant_id: tenantId })}`)
+    const res = await request<MemoryListResponse>(
+      `/memory${qs({ source: 'chroma', tenant_id: tenantId })}`,
+    )
     return res.memories
   },
 
-  /** DELETE /memory/{id}?tenant_id= — tenant_id is required, not optional. */
+  /**
+   * GET /memory?source=agent&customer_id= — what the agent itself chose to
+   * write to its mounted store during a session, as files with paths.
+   */
+  listAgentMemory: (customerId: string, opts: { includeContent?: boolean } = {}) =>
+    request<AgentMemoryListResponse>(
+      `/memory${qs({
+        source: 'agent',
+        customer_id: customerId,
+        include_content: opts.includeContent ? 'true' : undefined,
+      })}`,
+    ),
+
+  /**
+   * DELETE /memory/{id}?source=chroma&tenant_id=
+   *
+   * `source` has no default server-side, deliberately: the two stores hold
+   * different things and a wrong guess destroys data.
+   */
   deleteMemory: (id: string, tenantId: string) =>
     request<DeletedMemory>(
-      `/memory/${encodeURIComponent(id)}${qs({ tenant_id: tenantId })}`,
+      `/memory/${encodeURIComponent(id)}${qs({ source: 'chroma', tenant_id: tenantId })}`,
       { method: 'DELETE' },
     ),
 

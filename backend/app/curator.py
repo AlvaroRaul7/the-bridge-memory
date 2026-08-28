@@ -59,6 +59,7 @@ RESPONSE_SCHEMA = {
                     "remove": {"type": "array", "items": {"type": "string"}},
                 },
                 "required": ["keep", "remove"],
+                "additionalProperties": False,
             },
         },
         "contradictions": {
@@ -70,12 +71,14 @@ RESPONSE_SCHEMA = {
                     "reason": {"type": "string"},
                 },
                 "required": ["ids", "reason"],
+                "additionalProperties": False,
             },
         },
         "prune": {"type": "array", "items": {"type": "string"}},
         "summary": {"type": "string"},
     },
     "required": ["duplicate_groups", "contradictions", "prune", "summary"],
+    "additionalProperties": False,
 }
 
 

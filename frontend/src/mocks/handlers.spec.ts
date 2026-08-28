@@ -110,8 +110,10 @@ test('POST /memory 422s without the required fields', async () => {
 
 /* --- sessions -------------------------------------------------------------- */
 
-test('POST /session takes only a title and instructions', async () => {
+test('POST /session scopes a store to the customer and module', async () => {
   const created = await api.createSession({
+    customer_id: 'user_1',
+    module: 'card-a-onboarding',
     title: 'Onboarding · today',
     instructions: 'You are assisting with card-a-onboarding.',
   })
@@ -121,16 +123,45 @@ test('POST /session takes only a title and instructions', async () => {
   expect(created).not.toHaveProperty('tenant_id')
   expect(created).not.toHaveProperty('user_id')
 
-  const fetched = await api.getSession(created.id)
+  const fetched = await api.getSession(created.id, 'user_1', 'card-a-onboarding')
   expect(fetched.id).toBe(created.id)
 })
 
+test('customer_id is required on POST /session', async () => {
+  await expect(
+    // @ts-expect-error — the contract requires it; this proves the server does too.
+    api.createSession({ title: 'no customer' }),
+  ).rejects.toMatchObject({ status: 422 })
+})
+
+test('the same customer gets a different store per module', async () => {
+  const onboarding = await api.createSession({
+    customer_id: 'user_1',
+    module: 'card-a-onboarding',
+  })
+  const diligence = await api.createSession({
+    customer_id: 'user_1',
+    module: 'card-c-ma-diligence',
+  })
+  const again = await api.createSession({
+    customer_id: 'user_1',
+    module: 'card-a-onboarding',
+  })
+
+  // Different assistant, different memory. Same assistant, same memory.
+  expect(onboarding.memory_store_id).not.toBe(diligence.memory_store_id)
+  expect(again.memory_store_id).toBe(onboarding.memory_store_id)
+})
+
 test('GET /session/{id} 404s on an unknown id', async () => {
-  await expect(api.getSession('sess_nope')).rejects.toMatchObject({ status: 404 })
+  await expect(api.getSession('sess_nope', 'user_1')).rejects.toMatchObject({
+    status: 404,
+  })
 })
 
 test('POST /session/{id}/message answers and reports tool use', async () => {
   const session = await api.createSession({
+    customer_id: 'user_1',
     instructions: 'You are assisting with card-a-onboarding.',
   })
   const reply = await api.sendMessage(session.id, 'How do I get prod access?')
@@ -143,6 +174,7 @@ test('POST /session/{id}/message answers and reports tool use', async () => {
 
 test('a later turn reflects newer information than the first', async () => {
   const session = await api.createSession({
+    customer_id: 'user_1',
     instructions: 'You are assisting with card-a-onboarding.',
   })
   const first = await api.sendMessage(session.id, 'How do I get prod access?')

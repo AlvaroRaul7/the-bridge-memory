@@ -18,8 +18,8 @@ import pytest
 os.environ.setdefault("BACKEND_API_KEY", "test-key")
 os.environ.setdefault("AGENT_ID", "agent_test")
 os.environ.setdefault("ENVIRONMENT_ID", "env_test")
-os.environ.setdefault("MEMORY_STORE_ID", "memstore_test")
 
+import app.agents as agents_module  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from app.config import Settings, get_settings  # noqa: E402
@@ -28,6 +28,7 @@ from app.main import create_app  # noqa: E402
 
 API_KEY = "test-key"
 STORE_ID = "memstore_test"
+CUSTOMER_ID = "customer-1"
 NOW = datetime(2026, 8, 28, 12, 0, tzinfo=timezone.utc)
 
 
@@ -56,12 +57,32 @@ def terminated() -> SimpleNamespace:
     return SimpleNamespace(type="session.status_terminated")
 
 
+def memory_item(
+    memory_id: str, path: str, size: int = 10, content: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="memory",
+        id=memory_id,
+        path=path,
+        content_size_bytes=size,
+        created_at=NOW,
+        updated_at=NOW,
+        content=content,
+    )
+
+
+def memory_prefix(path: str) -> SimpleNamespace:
+    return SimpleNamespace(type="memory_prefix", path=path)
+
+
 # --- the fake client --------------------------------------------------------
 #
-# Only covers client.beta.sessions.* — agents.py no longer touches
-# client.beta.memory_stores.* (that proxy was replaced by memory_engine/
-# ChromaDB, which the /memory router calls directly; see tests/test_memory.py
-# for how those routes are tested, via monkeypatch on memory_engine calls).
+# Covers client.beta.sessions.*, client.beta.memory_stores.* (both
+# .create() — for the Tier-3 per-customer store — and .memories.list()/
+# .delete() — the agent's own store, the files it writes during a session,
+# which /memory?source=agent reads), and client.files.upload() for the
+# Tier-3 document-attachment flow. The Chroma tier is separate and is
+# tested by monkeypatching memory_engine calls; see test_memory.py.
 
 
 class FakeStream:
@@ -120,18 +141,88 @@ class FakeSessions:
         )
 
 
+class FakeMemories:
+    def __init__(self, owner: "FakeClient") -> None:
+        self._owner = owner
+
+    def list(self, memory_store_id: str, **kwargs: Any) -> SimpleNamespace:
+        self._owner.listed.append((memory_store_id, kwargs))
+        return SimpleNamespace(data=list(self._owner.memories))
+
+    def delete(self, memory_id: str, *, memory_store_id: str, **_: Any) -> None:
+        if memory_id not in {m.id for m in self._owner.memories}:
+            raise self._owner.not_found_error()
+        self._owner.deleted.append((memory_id, memory_store_id))
+
+
+class FakeMemoryStores:
+    """client.beta.memory_stores — both .create() (Tier-3 per-customer
+    store) and the nested .memories resource (the agent's own store)."""
+
+    def __init__(self, owner: "FakeClient") -> None:
+        self._owner = owner
+        self.memories = FakeMemories(owner)
+
+    def create(self, **kwargs: Any) -> SimpleNamespace:
+        self._owner.memory_stores_created.append(kwargs)
+        return SimpleNamespace(id=STORE_ID)
+
+
+class FakeFiles:
+    def __init__(self, owner: "FakeClient") -> None:
+        self._owner = owner
+        self._next_id = 0
+
+    def upload(self, *, file: Any, **_: Any) -> SimpleNamespace:
+        self._next_id += 1
+        file_id = f"file_{self._next_id}"
+        self._owner.uploaded_files.append((file_id, file))
+        return SimpleNamespace(id=file_id)
+
+
 class FakeClient:
-    """Just enough of `client.beta.*` for agents.py."""
+    """Just enough of `client.beta.*` and `client.files.*` for agents.py."""
 
     def __init__(self) -> None:
         self.events: list[Any] = [agent_message("hello"), idle("end_turn")]
         self.created: list[dict] = []
         self.sent: list[tuple[str, list[dict]]] = []
         self.streamed: list[str] = []
-        self.beta = SimpleNamespace(sessions=FakeSessions(self))
+        self.memories: list[Any] = []
+        self.listed: list[tuple[str, dict]] = []
+        self.deleted: list[tuple[str, str]] = []
+        self.memory_stores_created: list[dict] = []
+        self.uploaded_files: list[tuple[str, Any]] = []
+        self.beta = SimpleNamespace(
+            sessions=FakeSessions(self), memory_stores=FakeMemoryStores(self)
+        )
+        self.files = FakeFiles(self)
+
+    @staticmethod
+    def not_found_error() -> Exception:
+        import anthropic
+        import httpx2
+
+        request = httpx2.Request("DELETE", "https://api.anthropic.com/v1/memory")
+        return anthropic.NotFoundError(
+            "not found", response=httpx2.Response(404, request=request), body=None
+        )
 
 
 # --- fixtures ---------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def isolated_customer_store_state(tmp_path, monkeypatch):
+    """Every test gets its own customer-store registry file (never the real
+    repo-root one) and starts with no attached session documents — both are
+    module-level state in agents.py that would otherwise leak between tests."""
+    monkeypatch.setattr(
+        agents_module, "CUSTOMER_STORE_REGISTRY_PATH", tmp_path / "customer_memory_stores.json"
+    )
+    agents_module._SESSION_DOCUMENTS.clear()
+    yield
+    agents_module._SESSION_DOCUMENTS.clear()
 
 
 @pytest.fixture
@@ -166,7 +257,6 @@ def settings_with_timeout(app):
         app.dependency_overrides[get_settings] = lambda: Settings(
             agent_id=base.agent_id,
             environment_id=base.environment_id,
-            memory_store_id=base.memory_store_id,
             backend_api_key=base.backend_api_key,
             cors_origins=base.cors_origins,
             agent_timeout_seconds=seconds,

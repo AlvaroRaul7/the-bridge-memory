@@ -5,6 +5,12 @@ React + Vite + TypeScript + shadcn/ui. Implements
 against the API defined in
 [`specs/02-backend-fastapi.md`](../specs/02-backend-fastapi.md).
 
+> **Two frontends live in this directory.** This React app is the product UI
+> (Spec 3). Alongside it, `app.py` is a small Streamlit **tier tester** — a
+> thin `requests` wrapper that dumps raw JSON, for click-testing the backend
+> without curl. See [Streamlit tier tester](#streamlit-tier-tester) at the
+> bottom. They share nothing but the backend.
+
 ```bash
 npm install
 npm run dev            # http://localhost:5173
@@ -175,3 +181,40 @@ Run the auth tests with:
 ```bash
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_... npx playwright test auth
 ```
+
+
+---
+
+## Streamlit tier tester
+
+`app.py` — the simplest possible UI for click-testing the backend's tiers
+instead of curl/Postman: short-term session chat, Tier-3 growing document
+sets, the ChromaDB long-term tier, and the Tier-1 curator. Not a product UI;
+every button is one HTTP call and every response is dumped as raw JSON so you
+can see exactly what the API returned.
+
+```bash
+# backend/, in a separate terminal:
+cd ../backend && uvicorn app.main:app --reload
+
+# here:
+pip install -r requirements.txt
+streamlit run app.py          # http://localhost:8501
+```
+
+Fill in the backend URL and `X-API-Key` in the sidebar (matching whatever
+`BACKEND_API_KEY` the backend was started with) — nothing works until both are
+set.
+
+| Tab | What it exercises |
+| --- | --- |
+| **Session & Chat** | Creates a session for the sidebar's `customer_id`, sends messages, lists what the agent wrote to its own native store (`GET /memory?source=agent`). |
+| **Documents (Tier 3)** | Attaches documents to the active session via the Files API. Attach a batch, send a message, attach another — every message from then on references the whole accumulated set. |
+| **Long-term Memory** | Write/search/list/delete against the Chroma tier, scoped by `tenant_id`. |
+| **Curator (Tier 1)** | One curation pass over `tenant_id`'s Chroma memories. Write a couple of overlapping or contradicting memories first — the curator has nothing to do over 0 or 1 memory. |
+
+Known limits: no error handling beyond the raw HTTP status/JSON; `session_id`
+and document rows live in `st.session_state`, so a refresh loses them (the
+backend session is unaffected); `customer_id` and `tenant_id` are plain text
+fields, exactly as caller-supplied as they are over the API (see
+`backend/README.md`'s Auth section).

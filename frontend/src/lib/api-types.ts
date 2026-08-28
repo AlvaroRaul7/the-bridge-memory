@@ -19,8 +19,13 @@
 
 export interface SessionCreateRequest {
   /**
-   * Which module to open the session against. Each module has its own agent
-   * and its own memory store, so this decides who answers.
+   * Whose memory this session reads. Required: the backend get-or-creates a
+   * memory store per (customer, module) and tags it with this id.
+   */
+  customer_id: string
+  /**
+   * Which module to open the session against. Each module has its own agent,
+   * so this decides who answers — and, with customer_id, which store mounts.
    */
   module?: string
   title?: string
@@ -113,6 +118,7 @@ export interface MemoryHit extends MemoryRecord {
 }
 
 export interface MemoryListResponse {
+  source: 'chroma'
   tenant_id: string
   memories: MemoryRecord[]
 }
@@ -190,4 +196,28 @@ export function savedAt(metadata: MemoryMetadata): string | undefined {
 /** Chroma distance → a 0–1 closeness for display. Distance 0 = identical. */
 export function closeness(distance: number): number {
   return 1 / (1 + Math.max(0, distance))
+}
+
+/**
+ * The agent's own memory store — deliberately not the same shape as a Chroma
+ * MemoryRecord. A Chroma memory is a chunk of text with an embedding; an agent
+ * memory is a file with a path that the agent wrote itself with ordinary file
+ * tools. Collapsing them would hide which store you are looking at.
+ */
+export interface AgentMemoryRecord {
+  id: string
+  path: string
+  size_bytes?: number | null
+  created_at?: string | null
+  updated_at?: string | null
+  /** Only populated when include_content=true. */
+  content?: string | null
+}
+
+export interface AgentMemoryListResponse {
+  source: 'agent'
+  memory_store_id: string
+  memories: AgentMemoryRecord[]
+  /** Directory-like nodes returned when listing hierarchically. */
+  prefixes: string[]
 }

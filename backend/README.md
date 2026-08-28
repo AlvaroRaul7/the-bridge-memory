@@ -6,6 +6,14 @@ A thin HTTP layer over two separate memory tiers:
   Agent session with its native memory store mounted at `/mnt/memory/`.
   This service just relays messages; the agent itself decides what it
   writes there during a conversation.
+> **Two long-term stores, and `/memory` reads the agent's by default.**
+> The agent writes markdown into its own memory store during a session, using
+> ordinary file tools against `/mnt/memory/`. It has **no tool that can reach
+> this service**, so the Chroma tier stays empty until something explicitly
+> writes to it (Spec 4 would be what changes that). A caller asking "what does
+> the agent remember?" wants the store, so that is the default; pass
+> `?source=chroma` for the vector tier.
+
 - **Long-term** — the `/memory` routes are a thin wrapper over
   `memory_engine` (ChromaDB, see `../memory_engine/README.md`), scoped by a
   caller-supplied `tenant_id`. This service writes/reads/deletes memories
@@ -55,8 +63,8 @@ already run `create_agent.py` needs only the two keys.
 | `GET`    | `/session/{id}`         | Status, title, token/cost usage.                                                                  |
 | `POST`   | `/memory`               | `{tenant_id, text, metadata}` — write a long-term memory.                                         |
 | `GET`    | `/memory/search`        | `?tenant_id=...&q=...&k=5` — semantic search.                                                     |
-| `GET`    | `/memory`               | `?tenant_id=...` — list, no ranking (for a memory-inspector panel).                               |
-| `DELETE` | `/memory/{id}`          | `?tenant_id=...` — 404s if the id doesn't exist or isn't that tenant's.                           |
+| `GET`    | `/memory`               | `?source=agent` (default) lists the agent's own store; `?source=chroma&tenant_id=...` lists the vector tier. |
+| `DELETE` | `/memory/{id}`          | `?source=` is **required, no default**. `chroma` also needs `tenant_id` and 404s if it isn't that tenant's.  |
 | `POST`   | `/memory/curate`        | `{tenant_id}` — merge duplicates, flag contradictions, prune stale entries. See `app/curator.py`. |
 | `GET`    | `/healthz`              | No auth, no upstream call.                                                                        |
 

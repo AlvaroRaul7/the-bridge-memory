@@ -56,12 +56,30 @@ def terminated() -> SimpleNamespace:
     return SimpleNamespace(type="session.status_terminated")
 
 
+def memory_item(
+    memory_id: str, path: str, size: int = 10, content: str | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        type="memory",
+        id=memory_id,
+        path=path,
+        content_size_bytes=size,
+        created_at=NOW,
+        updated_at=NOW,
+        content=content,
+    )
+
+
+def memory_prefix(path: str) -> SimpleNamespace:
+    return SimpleNamespace(type="memory_prefix", path=path)
+
+
 # --- the fake client --------------------------------------------------------
 #
-# Only covers client.beta.sessions.* — agents.py no longer touches
-# client.beta.memory_stores.* (that proxy was replaced by memory_engine/
-# ChromaDB, which the /memory router calls directly; see tests/test_memory.py
-# for how those routes are tested, via monkeypatch on memory_engine calls).
+# Covers client.beta.sessions.* and client.beta.memory_stores.*. The latter is
+# the agent's own store — the files it writes during a session — which
+# /memory?source=agent reads. The Chroma tier is separate and is tested by
+# monkeypatching memory_engine calls; see tests/test_memory.py.
 
 
 class FakeStream:
@@ -120,6 +138,20 @@ class FakeSessions:
         )
 
 
+class FakeMemories:
+    def __init__(self, owner: "FakeClient") -> None:
+        self._owner = owner
+
+    def list(self, memory_store_id: str, **kwargs: Any) -> SimpleNamespace:
+        self._owner.listed.append((memory_store_id, kwargs))
+        return SimpleNamespace(data=list(self._owner.memories))
+
+    def delete(self, memory_id: str, *, memory_store_id: str, **_: Any) -> None:
+        if memory_id not in {m.id for m in self._owner.memories}:
+            raise self._owner.not_found_error()
+        self._owner.deleted.append((memory_id, memory_store_id))
+
+
 class FakeClient:
     """Just enough of `client.beta.*` for agents.py."""
 
@@ -128,7 +160,23 @@ class FakeClient:
         self.created: list[dict] = []
         self.sent: list[tuple[str, list[dict]]] = []
         self.streamed: list[str] = []
-        self.beta = SimpleNamespace(sessions=FakeSessions(self))
+        self.memories: list[Any] = []
+        self.listed: list[tuple[str, dict]] = []
+        self.deleted: list[tuple[str, str]] = []
+        self.beta = SimpleNamespace(
+            sessions=FakeSessions(self),
+            memory_stores=SimpleNamespace(memories=FakeMemories(self)),
+        )
+
+    @staticmethod
+    def not_found_error() -> Exception:
+        import anthropic
+        import httpx2
+
+        request = httpx2.Request("DELETE", "https://api.anthropic.com/v1/memory")
+        return anthropic.NotFoundError(
+            "not found", response=httpx2.Response(404, request=request), body=None
+        )
 
 
 # --- fixtures ---------------------------------------------------------------

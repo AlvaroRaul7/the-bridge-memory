@@ -111,8 +111,38 @@ class MemoryHit(MemoryRecord):
 
 
 class MemoryListResponse(BaseModel):
+    source: Literal["chroma"] = "chroma"
     tenant_id: str
     memories: list[MemoryRecord]
+
+
+# --- the agent's own memory store -------------------------------------------
+#
+# Distinct from the Chroma tier above and deliberately not squeezed into the
+# same shape. A Chroma memory is a chunk of text with an embedding; an agent
+# memory is a *file with a path* that the agent wrote itself with ordinary file
+# tools. Collapsing them would hide which store a caller is looking at.
+
+
+class AgentMemoryRecord(BaseModel):
+    id: str
+    path: str
+    size_bytes: int | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    content: str | None = Field(
+        default=None, description="Only populated when include_content=true."
+    )
+
+
+class AgentMemoryListResponse(BaseModel):
+    source: Literal["agent"] = "agent"
+    memory_store_id: str
+    memories: list[AgentMemoryRecord]
+    prefixes: list[str] = Field(
+        default_factory=list,
+        description="Directory-like nodes returned when listing hierarchically.",
+    )
 
 
 class DeletedMemory(BaseModel):
